@@ -1,0 +1,4149 @@
+package BudgetMode;
+
+import DynastyMode.PlayMenu;
+
+import javax.swing.*;
+import javax.swing.border.EmptyBorder;
+import javax.swing.border.TitledBorder;
+import javax.swing.event.ListSelectionListener;
+import javax.swing.table.DefaultTableModel;
+import javax.swing.table.TableRowSorter;
+import javax.swing.table.DefaultTableCellRenderer;
+import javax.swing.RowFilter;
+import javax.swing.event.DocumentListener;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.TableModelEvent;
+import javax.swing.table.TableCellEditor;
+import javax.swing.Timer; // Explicitly import javax.swing.Timer
+import javax.swing.plaf.basic.BasicScrollBarUI;
+
+
+import java.awt.*;
+import java.awt.event.*;
+import java.awt.geom.RoundRectangle2D;
+import java.io.*;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.util.*;
+import java.util.List;
+import java.util.Comparator;
+import java.util.stream.Collectors;
+
+
+public class UnifiedFinanceManager extends JFrame {
+    private JTable playerTable;
+    private DefaultTableModel tableModel;
+    private TableRowSorter<DefaultTableModel> sorter;
+    private JLabel budgetLabel, seasonLabel, recordLabel, teamNameLabel;
+    private JLabel totalSalaryLabel, avgSalaryLabel;
+    private AnimatedButton nextSeasonBtn, addPlayerBtn, tradeBtn, marketBtn, resetBtn, moreBtn;
+    private AnimatedButton extendContractBtn, freeAgentOffersBtn, achievementsBtn;
+    private int budget = 150_000_000;
+    private int season = 1;
+    private int wins = 0, losses = 0;
+    private boolean madePlayoffs = false, wonChampionship = false;
+    private String selectedTeam = "";
+    private List<Player> team = new ArrayList<>();
+    private List<Player> market = new ArrayList<>();
+    private List<Player> originalMarket = new ArrayList<>();
+    private List<TransactionLog> transactionLogs = new ArrayList<>();
+    private List<DraftPick> draftPicks = new ArrayList<>();
+    private List<Achievement> achievements = new ArrayList<>();
+    private boolean isGodModeEnabled = false;
+    private JLabel draftPicksSummaryLabel;
+    private JPanel draftPicksPanel;
+    private JLabel salaryCapLabel;
+
+    private Timer newsFeedTimer;
+    private Timer freeAgentCooldownTimer;
+    private Timer tradeCooldownTimer;
+    private JButton refreshOffersBtn; // Declared here for cooldown management
+    private JButton proposeTradeBtn; // Declared here for cooldown management
+
+    private String playerFile = "src/BudgetMode/players.txt";
+    private String userSaveDir;
+    private String saveFile;
+    private String logFile;
+    private String achievementFile;
+
+    private Image backgroundImage = new ImageIcon("C://Euwan Files//A122 Files//Computer Science//Capstone//BasketBall Simulator Game//src//Ball Menu.png").getImage();
+    private Random random = new Random();
+
+    private final int MAX_TEAM_SIZE_NORMAL = 15;
+    private int maxTeamSize = MAX_TEAM_SIZE_NORMAL;
+    private final long MIN_SALARY_FLOOR = 50_000_000L;
+    private int initialBudget = 150_000_000;
+    private final int MIN_TEAM_SIZE_FOR_SEASON = 10;
+    private final int NBA_SALARY_CAP = 160_000_000;
+
+    // Ticket system
+    private final int SEASON_TICKET_STOCK = 20000;
+    private final int MIN_TICKET_PRICE = 300;
+    private final int MAX_TICKET_PRICE = 4000;
+
+    private int ticketPrice = 1000;
+    private int remainingTickets = SEASON_TICKET_STOCK;
+    private int totalTicketsSold = 0;
+    private int totalTicketIncome = 0;
+
+    private final int FOOD_PURCHASE_LIMIT = 5_000_000;
+    private int foodPurchaseThisSeason = 0;
+    private final int TICKET_INCOME_LIMIT = 10_000_000;
+    private int ticketIncomeThisSeason = 0;
+
+    // Income system
+    private int stadiumIncomeBalance = 0;
+
+    // Food & Drinks
+    private final Map<String, Integer> itemCostPrice = Map.of(
+            "Hotdog", 50,
+            "Burger", 80,
+            "Soda", 30
+    );
+    private Map<String, Integer> itemStock = new HashMap<>();
+    private Map<String, Integer> itemSellPrice = new HashMap<>();
+    private Map<String, Integer> itemSold = new HashMap<>();
+
+    {
+        // Initial default prices and zero stock
+        for (String item : itemCostPrice.keySet()) {
+            itemStock.put(item, 0);
+            itemSellPrice.put(item, itemCostPrice.get(item) + 30); // Suggested markup
+            itemSold.put(item, 0);
+        }
+    }
+
+
+    private static final String[] NBA_TEAMS = {
+            "Atlanta Hawks", "Boston Celtics", "Brooklyn Nets", "Charlotte Hornets", "Chicago Bulls",
+            "Cleveland Cavaliers", "Dallas Mavericks", "Denver Nuggets", "Detroit Pistons", "Golden State Warriors",
+            "Houston Rockets", "Indiana Pacers", "LA Clippers", "Los Angeles Lakers", "Memphis Grizzlies",
+            "Miami Heat", "Milwaukee Bucks", "Minnesota Timberwolves", "New Orleans Pelicans", "New York Knicks",
+            "Oklahoma City Thunder", "Orlando Magic", "Philadelphia 76ers", "Phoenix Suns", "Portland Trail Blazers",
+            "Sacramento Kings", "San Antonio Spurs", "Toronto Raptors", "Utah Jazz", "Washington Wizards"
+    };
+
+    private String formatMoney(int amount) {
+        return String.format("%,d", amount);
+    }
+
+    private String currentUsername;
+    private JTextArea newsFeedArea;
+
+    public UnifiedFinanceManager() {
+        currentUsername = "player";
+        setupUserSpecificPaths();
+
+        selectTeam();
+        loadPlayers();
+        resetGameData();
+        initializeRandomTeam();
+
+        initializeGUI();
+
+        loadTransactionLogs();
+        loadAchievements();
+        loadData();
+
+        if (Boolean.parseBoolean(System.getProperty("initialGodMode", "false"))) {
+            isGodModeEnabled = true;
+            System.clearProperty("initialGodMode");
+        } else {
+            isGodModeEnabled = false;
+        }
+
+        refreshTable();
+        updateLabels();
+        updateGodModeState();
+    }
+
+    private void setupUserSpecificPaths() {
+        userSaveDir = "saves/" + currentUsername;
+        File userDir = new File(userSaveDir);
+        if (!userDir.exists()) {
+            userDir.mkdirs();
+        }
+        saveFile = userSaveDir + "/budget_data.txt";
+        logFile = userSaveDir + "/transaction_logs.txt";
+        achievementFile = userSaveDir + "/achievements.txt";
+    }
+
+    private void configureDialog(JDialog dialog, String title, Color headerBgColor) {
+        dialog.setUndecorated(true);
+        dialog.setBackground(new Color(0, 0, 0, 0));
+        dialog.setLayout(new BorderLayout());
+
+        dialog.addComponentListener(new ComponentAdapter() {
+            @Override
+            public void componentResized(ComponentEvent e) {
+                dialog.setShape(new RoundRectangle2D.Double(0, 0, dialog.getWidth(), dialog.getHeight(), 30, 30));
+            }
+        });
+
+        JPanel headerPanel = new JPanel();
+        headerPanel.setBackground(headerBgColor);
+        JLabel headerLabel = new JLabel(title, SwingConstants.CENTER);
+        headerLabel.setFont(new Font("Arial", Font.BOLD, 22));
+        headerLabel.setForeground(Color.WHITE);
+        headerLabel.setBorder(new EmptyBorder(15, 0, 15, 0));
+        headerPanel.add(headerLabel);
+        dialog.add(headerPanel, BorderLayout.NORTH);
+
+        JPanel closePanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        closePanel.setBackground(new Color(30, 30, 30));
+        closePanel.setBorder(new EmptyBorder(10, 0, 10, 10));
+
+        JButton closeBtn = createStyledButton("Close", new Color(105, 105, 105));
+        closeBtn.addActionListener(e -> {
+            dialog.setVisible(false);
+            dialog.dispose();
+        });
+
+        closePanel.add(closeBtn);
+        dialog.add(closePanel, BorderLayout.SOUTH);
+
+        dialog.getContentPane().setBackground(new Color(30, 30, 30));
+    }
+
+    private void selectTeam() {
+        JDialog teamDialog = new JDialog((Frame) null, "Select Your NBA Team", true);
+        configureDialog(teamDialog, "Choose Your NBA Team", new Color(139, 0, 0));
+        teamDialog.setSize(500, 400);
+        teamDialog.setLocationRelativeTo(null);
+
+        BorderLayout layout = (BorderLayout) teamDialog.getContentPane().getLayout();
+        JPanel closePanelFromConfigure = (JPanel) layout.getLayoutComponent(BorderLayout.SOUTH);
+
+        if (closePanelFromConfigure != null) {
+            teamDialog.getContentPane().remove(closePanelFromConfigure);
+        }
+
+        JList<String> teamList = new JList<>(NBA_TEAMS);
+        teamList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        teamList.setSelectedIndex(0);
+        teamList.setFont(new Font("Arial", Font.PLAIN, 14));
+        teamList.setFixedCellHeight(25);
+        teamList.setBackground(new Color(45, 45, 45));
+        teamList.setForeground(Color.WHITE);
+
+        JScrollPane scrollPane = new JScrollPane(teamList);
+        styleJScrollPane(scrollPane, new Color(80, 0, 0), new Color(30, 30, 30)); // Apply custom scrollbar style with maroon
+        scrollPane.setBorder(new EmptyBorder(10, 10, 10, 10));
+        teamDialog.add(scrollPane, BorderLayout.CENTER);
+
+        JPanel buttonPanel = new JPanel(new FlowLayout());
+        buttonPanel.setBackground(new Color(30, 30, 30));
+
+        JButton selectBtn = createStyledButton("Select Team", new Color(34, 139, 34));
+        JButton randomBtn = createStyledButton("Random", new Color(255, 140, 0));
+
+        final String[] result = {NBA_TEAMS[0]};
+
+        selectBtn.addActionListener(e -> {
+            result[0] = teamList.getSelectedValue();
+            teamDialog.dispose();
+        });
+
+        randomBtn.addActionListener(e -> {
+            result[0] = NBA_TEAMS[random.nextInt(NBA_TEAMS.length)];
+            teamDialog.dispose();
+        });
+
+        buttonPanel.add(selectBtn);
+        buttonPanel.add(randomBtn);
+        teamDialog.add(buttonPanel, BorderLayout.SOUTH);
+
+        teamDialog.setVisible(true);
+        selectedTeam = result[0];
+    }
+
+    private void resetGameData() {
+        budget = initialBudget;
+        season = 1;
+        wins = losses = 0;
+        madePlayoffs = false;
+        wonChampionship = false;
+        team.clear();
+        transactionLogs.clear();
+        market.clear();
+        draftPicks.clear();
+        achievements.clear();
+        isGodModeEnabled = false;
+        maxTeamSize = MAX_TEAM_SIZE_NORMAL;
+
+        int currentYear = LocalDate.now().getYear();
+        draftPicks.add(new DraftPick(currentYear + 1, 1));
+        draftPicks.add(new DraftPick(currentYear + 1, 2));
+
+        for (Player p : originalMarket) {
+            market.add(new Player(p.code, p.name, p.position, p.salary, p.years, p.status, p.ppg, p.apg, p.rpg));
+        }
+
+        initializeAchievements();
+    }
+
+    private AnimatedButton createAnimatedButton(String text) {
+        AnimatedButton button = new AnimatedButton(text);
+        button.setPreferredSize(new Dimension(140, 50));
+        return button;
+    }
+
+
+    private void initializeGUI() {
+        budgetLabel = new JLabel("Budget: ", SwingConstants.CENTER);
+        budgetLabel.setFont(new Font("Arial", Font.BOLD, 16));
+        budgetLabel.setForeground(Color.WHITE);
+
+        seasonLabel = new JLabel("Season: ", SwingConstants.CENTER);
+        seasonLabel.setFont(new Font("Arial", Font.BOLD, 16));
+        seasonLabel.setForeground(Color.WHITE);
+
+        recordLabel = new JLabel("Record: ", SwingConstants.CENTER);
+        recordLabel.setFont(new Font("Arial", Font.BOLD, 16));
+        recordLabel.setForeground(Color.WHITE);
+
+        teamNameLabel = new JLabel("", SwingConstants.CENTER);
+        teamNameLabel.setFont(new Font("Arial", Font.BOLD, 24));
+        teamNameLabel.setForeground(Color.YELLOW);
+
+        totalSalaryLabel = new JLabel("Total Salary: ", SwingConstants.CENTER);
+        totalSalaryLabel.setFont(new Font("Arial", Font.BOLD, 16));
+        totalSalaryLabel.setForeground(Color.WHITE);
+
+        avgSalaryLabel = new JLabel("Avg Salary: ", SwingConstants.CENTER);
+        avgSalaryLabel.setFont(new Font("Arial", Font.BOLD, 16));
+        avgSalaryLabel.setForeground(Color.WHITE);
+
+        draftPicksSummaryLabel = new JLabel("Draft Picks: ", SwingConstants.CENTER);
+        draftPicksSummaryLabel.setFont(new Font("Arial", Font.BOLD, 16));
+        draftPicksSummaryLabel.setForeground(Color.WHITE);
+
+        salaryCapLabel = new JLabel("Salary Cap: ", SwingConstants.CENTER);
+        salaryCapLabel.setFont(new Font("Arial", Font.BOLD, 16));
+        salaryCapLabel.setForeground(Color.WHITE);
+
+
+        setTitle("Unified Finance Manager - " + selectedTeam + (isGodModeEnabled ? " (GOD MODE)" : ""));
+        setSize(1400, 900);
+        setLocationRelativeTo(null);
+        setUndecorated(true);
+        setShape(new RoundRectangle2D.Double(0, 0, 1400, 900, 40, 40));
+        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        setContentPane(new JPanel() {
+            @Override
+            protected void paintComponent(Graphics g) {
+                super.paintComponent(g);
+                g.drawImage(backgroundImage, 0, 0, getWidth(), getHeight(), this);
+            }
+        });
+        getContentPane().setLayout(null);
+
+        JLabel title = new JLabel("Team Finance Manager", SwingConstants.CENTER);
+        title.setFont(new Font("Arial", Font.BOLD, 32));
+        title.setForeground(Color.WHITE);
+        title.setBounds(500, 20, 400, 40);
+        getContentPane().add(title);
+
+        teamNameLabel.setText(selectedTeam);
+        teamNameLabel.setBounds(500, 60, 400, 30);
+        getContentPane().add(teamNameLabel);
+
+        // Season Counter Panel (new position)
+        JPanel seasonPanel = createRoundedPanelForLabel(seasonLabel);
+        seasonPanel.setBounds(50, 20, 200, 60); // Top-left corner
+        getContentPane().add(seasonPanel);
+
+
+        tableModel = new DefaultTableModel(new Object[]{"Code", "Name", "Pos", "Salary", "Years", "Status", "PPG", "APG", "RPG", "OVR"}, 0);
+        playerTable = new JTable(tableModel);
+        sorter = new TableRowSorter<>(tableModel);
+        playerTable.setRowSorter(sorter);
+        setupSorting();
+
+        playerTable.getColumnModel().getColumn(1).setPreferredWidth(200);
+
+        playerTable.setDefaultRenderer(Object.class, new DarkThemeTableCellRenderer(team));
+
+        playerTable.setBackground(Color.BLACK);
+        playerTable.setForeground(Color.WHITE);
+        playerTable.getTableHeader().setBackground(new Color(40, 0, 0));
+        playerTable.getTableHeader().setForeground(Color.WHITE);
+        playerTable.setSelectionBackground(new Color(80, 0, 0));
+        playerTable.setSelectionForeground(Color.WHITE);
+        playerTable.setGridColor(new Color(60, 60, 60));
+        playerTable.setFont(new Font("Arial", Font.PLAIN, 16));
+        playerTable.getTableHeader().setFont(new Font("Arial", Font.BOLD, 16));
+        playerTable.setRowHeight(30);
+
+        JScrollPane scrollPane = new JScrollPane(playerTable);
+        styleJScrollPane(scrollPane, new Color(80, 0, 0), new Color(30, 30, 30)); // Apply custom scrollbar style with maroon
+        scrollPane.setBounds(50, 100, 1300, 350);
+        scrollPane.setBorder(BorderFactory.createLineBorder(Color.GRAY, 2));
+        getContentPane().add(scrollPane);
+
+        JPanel financeOverviewPanel = new JPanel();
+        financeOverviewPanel.setOpaque(false);
+        financeOverviewPanel.setLayout(new GridBagLayout());
+        financeOverviewPanel.setBorder(BorderFactory.createTitledBorder(
+                BorderFactory.createLineBorder(Color.GRAY, 1),
+                "Team Financials & Records",
+                TitledBorder.CENTER,
+                TitledBorder.TOP,
+                new Font("Arial", Font.BOLD, 16),
+                Color.WHITE
+        ));
+
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(5, 10, 5, 10);
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        gbc.anchor = GridBagConstraints.WEST;
+
+        gbc.gridx = 0; gbc.gridy = 0; gbc.weightx = 0.5;
+        financeOverviewPanel.add(createRoundedPanelForLabel(budgetLabel), gbc);
+
+        gbc.gridx = 1; gbc.gridy = 0; gbc.weightx = 0.5;
+        financeOverviewPanel.add(createRoundedPanelForLabel(recordLabel), gbc); // Moved record here to align with budget
+
+        gbc.gridx = 0; gbc.gridy = 1; gbc.weightx = 0.5;
+        financeOverviewPanel.add(createRoundedPanelForLabel(totalSalaryLabel), gbc);
+
+        gbc.gridx = 1; gbc.gridy = 1; gbc.weightx = 0.5;
+        financeOverviewPanel.add(createRoundedPanelForLabel(avgSalaryLabel), gbc);
+
+        gbc.gridx = 0; gbc.gridy = 2; gbc.gridwidth = 2; // Span across two columns
+        financeOverviewPanel.add(createRoundedPanelForLabel(salaryCapLabel), gbc);
+
+
+        financeOverviewPanel.setBounds(50, 460, 600, 220); // Adjusted height for new label
+        getContentPane().add(financeOverviewPanel);
+
+        // Draft Picks Panel - Styling Update
+        draftPicksPanel = new JPanel() {
+            @Override
+            protected void paintComponent(Graphics g) {
+                super.paintComponent(g);
+                Graphics2D g2 = (Graphics2D) g.create();
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g2.setColor(new Color(0, 0, 0, 100)); // Transparent black
+                g2.fillRoundRect(0, 0, getWidth(), getHeight(), 15, 15);
+                g2.dispose();
+            }
+        };
+        draftPicksPanel.setLayout(new BorderLayout()); // Use BorderLayout for better content management
+        draftPicksPanel.setOpaque(false);
+        draftPicksPanel.setBorder(BorderFactory.createTitledBorder(
+                BorderFactory.createLineBorder(Color.GRAY, 1),
+                "Your Draft Picks",
+                TitledBorder.CENTER,
+                TitledBorder.TOP,
+                new Font("Arial", Font.BOLD, 16),
+                Color.WHITE
+        ));
+        draftPicksPanel.setBounds(50, financeOverviewPanel.getY() + financeOverviewPanel.getHeight() + 20, 550, 150);
+        getContentPane().add(draftPicksPanel);
+
+        // Wrap draftPicksSummaryLabel in a JScrollPane to make it scrollable
+        // Removed the wrapping of draftPicksSummaryLabel directly in a scroll pane here,
+        // instead setting the text content of the label which is inside the panel,
+        // and making the panel itself implicitly scrollable if needed by its layout.
+        // For actual scrollability, a JTextArea or similar inside a JScrollPane is better.
+        // For draft picks, it's a JLabel for summary, not a list to scroll.
+        // The user asked for the "draft picks menu are now scrollable". This refers to the dialog, not this summary label.
+        draftPicksPanel.add(draftPicksSummaryLabel, BorderLayout.CENTER);
+
+
+        // News Feed Panel - Styling Update
+        JPanel newsFeedPanel = new JPanel(new BorderLayout()) {
+            @Override
+            protected void paintComponent(Graphics g) {
+                super.paintComponent(g);
+                Graphics2D g2 = (Graphics2D) g.create();
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g2.setColor(new Color(0, 0, 0, 100)); // Transparent black
+                g2.fillRoundRect(0, 0, getWidth(), getHeight(), 15, 15);
+                g2.dispose();
+            }
+        };
+        newsFeedPanel.setOpaque(false);
+        newsFeedPanel.setBorder(BorderFactory.createTitledBorder(
+                BorderFactory.createLineBorder(Color.GRAY, 1),
+                "Recent Activity Feed",
+                TitledBorder.CENTER,
+                TitledBorder.TOP,
+                new Font("Arial", Font.BOLD, 16),
+                Color.WHITE
+        ));
+        newsFeedPanel.setBounds(
+                draftPicksPanel.getX() + draftPicksPanel.getWidth() + 20,
+                draftPicksPanel.getY(),
+                1400 - (draftPicksPanel.getX() + draftPicksPanel.getWidth() + 20) - 50,
+                draftPicksPanel.getHeight()
+        );
+        getContentPane().add(newsFeedPanel);
+
+        newsFeedArea = new JTextArea();
+        newsFeedArea.setEditable(false);
+        newsFeedArea.setLineWrap(true);
+        newsFeedArea.setWrapStyleWord(true);
+        newsFeedArea.setFont(new Font("Arial", Font.PLAIN, 14));
+        newsFeedArea.setBackground(new Color(0, 0, 0, 0)); // Fully transparent
+        newsFeedArea.setForeground(Color.WHITE);
+        newsFeedArea.setOpaque(false);
+
+        JScrollPane newsScrollPane = new JScrollPane(newsFeedArea);
+        styleJScrollPane(newsScrollPane, new Color(80, 0, 0), new Color(30, 30, 30)); // Apply custom scrollbar style with maroon
+        newsScrollPane.setBorder(BorderFactory.createLineBorder(Color.GRAY, 1));
+        newsScrollPane.setOpaque(false);
+        newsScrollPane.getViewport().setOpaque(false);
+        newsFeedPanel.add(newsScrollPane, BorderLayout.CENTER);
+
+        newsFeedTimer = new Timer(5000, new ActionListener() {
+            private int currentIndex = 0;
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                if (transactionLogs.isEmpty()) {
+                    newsFeedArea.setText("No recent activity.");
+                    return;
+                }
+                int numLogsToShow = Math.min(3, transactionLogs.size());
+                StringBuilder sb = new StringBuilder();
+                for (int i = 0; i < numLogsToShow; i++) {
+                    int logIndex = transactionLogs.size() - 1 - ((currentIndex + i) % transactionLogs.size());
+                    TransactionLog log = transactionLogs.get(logIndex);
+                    sb.append(log.date).append(": ").append(log.details).append("\n");
+                }
+                newsFeedArea.setText(sb.toString().trim());
+                currentIndex = (currentIndex + 1) % transactionLogs.size();
+            }
+        });
+        newsFeedTimer.start();
+
+
+        JPanel buttonActionsPanel = new JPanel();
+        buttonActionsPanel.setOpaque(false);
+        buttonActionsPanel.setLayout(new FlowLayout(FlowLayout.CENTER, 15, 15));
+
+        addPlayerBtn = createAnimatedButton("Add Player");
+        tradeBtn = createAnimatedButton("Trade");
+        marketBtn = createAnimatedButton("Market");
+        extendContractBtn = createAnimatedButton("Extend Contract");
+        freeAgentOffersBtn = createAnimatedButton("Free Agent Offers");
+        achievementsBtn = createAnimatedButton("Achievements");
+        AnimatedButton godModeBtn = createAnimatedButton("God Mode");
+        nextSeasonBtn = createAnimatedButton("Next Season");
+        moreBtn = createAnimatedButton("More");
+        resetBtn = createAnimatedButton("Reset");
+        AnimatedButton backBtn = createAnimatedButton("Back");
+        AnimatedButton stadiumBtn = createAnimatedButton("Stadium");
+
+        addPlayerBtn.addActionListener(e -> showAddPlayerForm());
+        tradeBtn.addActionListener(e -> openTradeCenter());
+        marketBtn.addActionListener(e -> openPlayerMarket());
+        extendContractBtn.addActionListener(e -> showContractExtensionDialog());
+        freeAgentOffersBtn.addActionListener(e -> showFreeAgentOffers());
+        achievementsBtn.addActionListener(e -> showAchievementsDialog());
+        godModeBtn.addActionListener(e -> toggleGodMode());
+        nextSeasonBtn.addActionListener(e -> nextSeason());
+        moreBtn.addActionListener(e -> showMoreOptions());
+        resetBtn.addActionListener(e -> resetSeason());
+        backBtn.addActionListener(e -> {
+            new PlayMenu(this);
+            this.dispose();
+        });
+        stadiumBtn.addActionListener(e -> showStadiumDialog());
+
+        buttonActionsPanel.add(nextSeasonBtn);
+        buttonActionsPanel.add(marketBtn);
+        buttonActionsPanel.add(freeAgentOffersBtn);
+        buttonActionsPanel.add(extendContractBtn);
+        buttonActionsPanel.add(tradeBtn);
+        buttonActionsPanel.add(achievementsBtn);
+        buttonActionsPanel.add(moreBtn);
+        buttonActionsPanel.add(resetBtn);
+        buttonActionsPanel.add(stadiumBtn);
+        buttonActionsPanel.add(godModeBtn);
+        buttonActionsPanel.add(addPlayerBtn);
+        buttonActionsPanel.add(backBtn);
+
+
+        buttonActionsPanel.setBounds(670, 460, 680, 390);
+        getContentPane().add(buttonActionsPanel);
+
+        updateDraftPicksSummary();
+    }
+
+    private void convertIncomeToBudget(JLabel incomeLabel) {
+        if (stadiumIncomeBalance <= 0) {
+            JOptionPane.showMessageDialog(this, "No income to convert!", "Info", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        int confirm = JOptionPane.showConfirmDialog(this,
+                "Convert ₱" + formatMoney(stadiumIncomeBalance) + " to team budget?",
+                "Convert Income", JOptionPane.YES_NO_OPTION);
+        if (confirm == JOptionPane.YES_OPTION) {
+            budget += stadiumIncomeBalance;
+            addTransactionLog("INCOME_CONVERTED", "Stadium Income", stadiumIncomeBalance, "Converted income to budget");
+            stadiumIncomeBalance = 0;
+            incomeLabel.setText("Income Balance: ₱0");
+            updateLabels();
+        }
+    }
+
+
+    private void showStadiumDialog() {
+        JDialog dialog = new JDialog(this, "Stadium Management", true);
+        configureDialog(dialog, "Stadium Manager", new Color(139, 0, 0));
+        dialog.setSize(800, 600);
+        dialog.setLocationRelativeTo(this);
+
+        JPanel content = new JPanel(new BorderLayout());
+        content.setBackground(new Color(30, 30, 30));
+
+        // ========== TOP: TITLE + ? Button ==========
+        JPanel topBar = new JPanel(new BorderLayout());
+        topBar.setOpaque(false);
+        JLabel title = new JLabel("Manage Tickets, Food & Income", SwingConstants.CENTER);
+        title.setFont(new Font("Arial", Font.BOLD, 20));
+        title.setForeground(Color.WHITE);
+        topBar.add(title, BorderLayout.CENTER);
+
+        JButton helpBtn = new JButton("?");
+        helpBtn.setFocusPainted(false);
+        helpBtn.setContentAreaFilled(false);
+        helpBtn.setForeground(Color.WHITE);
+        helpBtn.setFont(new Font("Arial", Font.BOLD, 18));
+        helpBtn.setBorder(BorderFactory.createEmptyBorder());
+        helpBtn.setPreferredSize(new Dimension(40, 40));
+        helpBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        helpBtn.setOpaque(false);
+        helpBtn.addActionListener(e -> {
+            String msg = """
+        TICKET PRICING:
+        - Higher prices = less demand
+        - Good team = fans pay more
+        - Bad team = go cheaper
+
+        FOOD SALES:
+        - Buy stock first
+        - Set price
+        - Profit = (sell price - cost) * quantity sold
+
+        INCOME:
+        - All profit goes to Income Balance
+        - Convert Income into Budget anytime
+        """;
+            JOptionPane.showMessageDialog(dialog, msg, "Help", JOptionPane.INFORMATION_MESSAGE);
+        });
+
+        JPanel helpPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        helpPanel.setOpaque(false);
+        helpPanel.add(helpBtn);
+        topBar.add(helpPanel, BorderLayout.WEST);
+        content.add(topBar, BorderLayout.NORTH);
+
+        // ========== CENTER: TICKETS + FOOD ==========
+        JPanel center = new JPanel(new GridLayout(1, 2));
+        center.setBackground(new Color(30, 30, 30));
+
+        // 🎟 Ticket Section
+        JPanel ticketPanel = new JPanel();
+        ticketPanel.setLayout(new BoxLayout(ticketPanel, BoxLayout.Y_AXIS));
+        ticketPanel.setBackground(new Color(40, 40, 40));
+        ticketPanel.setBorder(BorderFactory.createTitledBorder(BorderFactory.createLineBorder(Color.GRAY), "Ticket Sales", TitledBorder.CENTER, TitledBorder.TOP, new Font("Arial", Font.BOLD, 14), Color.WHITE));
+
+        JLabel priceLabel = new JLabel("Ticket Price: ₱" + ticketPrice, SwingConstants.CENTER);
+        priceLabel.setForeground(Color.RED);
+        priceLabel.setFont(new Font("Arial", Font.BOLD, 16));
+        priceLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
+
+        JSlider ticketSlider = new JSlider(MIN_TICKET_PRICE, MAX_TICKET_PRICE, ticketPrice);
+        ticketSlider.setPaintTicks(true);
+        ticketSlider.setPaintLabels(true);
+        ticketSlider.setMajorTickSpacing(1000);
+        ticketSlider.setMinorTickSpacing(100);
+        ticketSlider.setBackground(new Color(40, 40, 40));
+        ticketSlider.setForeground(Color.RED);
+        ticketSlider.addChangeListener(e -> {
+            ticketPrice = ticketSlider.getValue();
+            priceLabel.setText("Ticket Price: ₱" + ticketPrice);
+        });
+
+        JButton sellTicketsBtn = createStyledButton("Sell", new Color(0, 128, 0));
+        sellTicketsBtn.addActionListener(e -> {
+            double winRate = (wins + losses > 0) ? (wins * 1.0 / (wins + losses)) : 0;
+            double demandFactor = wonChampionship ? 1.2 : madePlayoffs ? 1.1 : winRate >= 0.6 ? 1.05 : winRate <= 0.4 ? 0.8 : 1.0;
+            double priceFactor = Math.max(0.3, 1.0 - (ticketPrice - 1000) / 3000.0);
+
+            int predictedSales = (int) (SEASON_TICKET_STOCK * demandFactor * priceFactor * 0.75);
+            int sold = Math.min(predictedSales, remainingTickets);
+            int income = sold * ticketPrice;
+
+            remainingTickets -= sold;
+            totalTicketsSold += sold;
+            totalTicketIncome += income;
+            stadiumIncomeBalance += income;
+
+            updateLabels();
+            JOptionPane.showMessageDialog(dialog, "Sold " + sold + " tickets for ₱" + formatMoney(income), "Ticket Sales", JOptionPane.INFORMATION_MESSAGE);
+        });
+
+        JLabel ticketStats = new JLabel("Remaining: " + remainingTickets + " | Sold: " + totalTicketsSold, SwingConstants.CENTER);
+        ticketStats.setForeground(Color.WHITE);
+        ticketStats.setFont(new Font("Arial", Font.BOLD, 14));
+        ticketStats.setAlignmentX(Component.CENTER_ALIGNMENT);
+
+        ticketPanel.add(Box.createVerticalStrut(10));
+        ticketPanel.add(priceLabel);
+        ticketPanel.add(ticketSlider);
+        ticketPanel.add(Box.createVerticalStrut(10));
+        ticketPanel.add(ticketStats);
+        ticketPanel.add(Box.createVerticalStrut(10));
+        ticketPanel.add(sellTicketsBtn);
+
+        // 🍔 Food Section
+        JPanel foodPanel = new JPanel();
+        foodPanel.setLayout(new BoxLayout(foodPanel, BoxLayout.Y_AXIS));
+        foodPanel.setBackground(new Color(40, 40, 40));
+        foodPanel.setBorder(BorderFactory.createTitledBorder(BorderFactory.createLineBorder(Color.GRAY), "Food & Drinks", TitledBorder.CENTER, TitledBorder.TOP, new Font("Arial", Font.BOLD, 14), Color.WHITE));
+
+        for (String item : itemCostPrice.keySet()) {
+            int cost = itemCostPrice.get(item);
+            int sell = itemSellPrice.get(item);
+
+            JLabel label = new JLabel(item + " - Stock: " + itemStock.get(item) + ", Price: ₱" + sell);
+            label.setForeground(Color.WHITE);
+            label.setFont(new Font("Arial", Font.PLAIN, 14));
+
+            JButton buyBtn = createStyledButton("Buy", new Color(100, 100, 255));
+            buyBtn.addActionListener(e -> {
+                String input = JOptionPane.showInputDialog(dialog, "How many " + item + " to buy? ₱" + cost + " each");
+                if (input != null) {
+                    try {
+                        int qty = Integer.parseInt(input);
+                        int totalCost = qty * cost;
+
+                        if (budget < totalCost) {
+                            JOptionPane.showMessageDialog(dialog, "Not enough budget!", "Error", JOptionPane.ERROR_MESSAGE);
+                            return;
+                        }
+
+                        if (foodPurchaseThisSeason + totalCost > FOOD_PURCHASE_LIMIT) {
+                            JOptionPane.showMessageDialog(dialog,
+                                    "Purchase exceeds ₱5,000,000 season limit for food & drink stocks.\nYou can only spend ₱" + formatMoney(FOOD_PURCHASE_LIMIT - foodPurchaseThisSeason) + " more this season.",
+                                    "Limit Reached", JOptionPane.WARNING_MESSAGE);
+                            return;
+                        }
+
+                        budget -= totalCost;
+                        foodPurchaseThisSeason += totalCost;
+                        itemStock.put(item, itemStock.get(item) + qty);
+                        updateLabels();
+                        JOptionPane.showMessageDialog(dialog, "Purchased " + qty + " " + item + "(s).", "Success", JOptionPane.INFORMATION_MESSAGE);
+                        dialog.dispose();
+                        showStadiumDialog();
+                    } catch (NumberFormatException ignored) {}
+                }
+            });
+
+            JButton sellBtn = createStyledButton("Sell", new Color(0, 180, 0));
+            sellBtn.addActionListener(e -> {
+                JOptionPane.showMessageDialog(dialog, "Food and drink sales only happen at the end of the season.", "Info", JOptionPane.INFORMATION_MESSAGE);
+            });
+
+        JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT));
+            row.setBackground(new Color(40, 40, 40));
+            row.add(label);
+            row.add(buyBtn);
+            row.add(sellBtn);
+            foodPanel.add(row);
+        }
+
+        center.add(ticketPanel);
+        center.add(foodPanel);
+        content.add(center, BorderLayout.CENTER);
+
+        // ========== RIGHT PANEL: Income ==========
+        JPanel rightPanel = new JPanel();
+        rightPanel.setPreferredSize(new Dimension(220, 100));
+        rightPanel.setLayout(new BoxLayout(rightPanel, BoxLayout.Y_AXIS));
+        rightPanel.setBackground(new Color(30, 30, 30));
+        rightPanel.setBorder(BorderFactory.createTitledBorder(BorderFactory.createLineBorder(Color.GRAY), "Income Balance", TitledBorder.CENTER, TitledBorder.TOP, new Font("Arial", Font.BOLD, 14), Color.WHITE));
+
+        JLabel incomeLabel = new JLabel("Income Balance: ₱" + formatMoney(stadiumIncomeBalance), SwingConstants.CENTER);
+        incomeLabel.setForeground(Color.YELLOW);
+        incomeLabel.setFont(new Font("Arial", Font.BOLD, 16));
+        incomeLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
+
+        JButton convertBtn = createStyledButton("Convert to Budget", new Color(139, 0, 0));
+        convertBtn.setAlignmentX(Component.CENTER_ALIGNMENT);
+        convertBtn.addActionListener(e -> {
+            convertIncomeToBudget(incomeLabel);
+            incomeLabel.setText("Income Balance: ₱" + formatMoney(stadiumIncomeBalance));
+        });
+
+        rightPanel.add(Box.createVerticalStrut(10));
+        rightPanel.add(incomeLabel);
+        rightPanel.add(Box.createVerticalStrut(10));
+        rightPanel.add(convertBtn);
+        content.add(rightPanel, BorderLayout.EAST);
+
+        // ========== BOTTOM ==========
+        JButton backBtn = createStyledButton("Back", new Color(105, 105, 105));
+        backBtn.addActionListener(e -> dialog.dispose());
+
+        JPanel bottom = new JPanel();
+        bottom.setBackground(new Color(30, 30, 30));
+        bottom.add(backBtn);
+        content.add(bottom, BorderLayout.SOUTH);
+
+        dialog.setContentPane(content);
+        dialog.setVisible(true);
+    }
+
+    private JLabel createStatLabel(String text) {
+        JLabel label = new JLabel(text, SwingConstants.CENTER);
+        label.setFont(new Font("Arial", Font.BOLD, 16));
+        label.setForeground(Color.WHITE);
+        label.setAlignmentX(Component.CENTER_ALIGNMENT);
+        return label;
+    }
+
+    private void styleJScrollPane(JScrollPane scrollPane, Color thumbColor, Color trackColor) {
+        scrollPane.getVerticalScrollBar().setUI(new BasicScrollBarUI() {
+            @Override
+            protected void configureScrollBarColors() {
+                this.thumbColor = thumbColor; // Maroon/Red
+                this.trackColor = trackColor; // Black/Dark Gray
+            }
+
+            @Override
+            protected JButton createDecreaseButton(int orientation) {
+                return createZeroButton();
+            }
+
+            @Override
+            protected JButton createIncreaseButton(int orientation) {
+                return createZeroButton();
+            }
+
+            private JButton createZeroButton() {
+                JButton button = new JButton();
+                button.setPreferredSize(new Dimension(0, 0));
+                button.setMinimumSize(new Dimension(0, 0));
+                button.setMaximumSize(new Dimension(0, 0));
+                return button;
+            }
+        });
+
+        scrollPane.getHorizontalScrollBar().setUI(new BasicScrollBarUI() {
+            @Override
+            protected void configureScrollBarColors() {
+                this.thumbColor = thumbColor; // Maroon/Red
+                this.trackColor = trackColor; // Black/Dark Gray
+            }
+
+            @Override
+            protected JButton createDecreaseButton(int orientation) {
+                return createZeroButton();
+            }
+
+            @Override
+            protected JButton createIncreaseButton(int orientation) {
+                return createZeroButton();
+            }
+
+            private JButton createZeroButton() {
+                JButton button = new JButton();
+                button.setPreferredSize(new Dimension(0, 0));
+                button.setMinimumSize(new Dimension(0, 0));
+                button.setMaximumSize(new Dimension(0, 0));
+                return button;
+            }
+        });
+    }
+
+
+    private void updateDraftPicksSummary() {
+        if (draftPicks.isEmpty()) {
+            draftPicksSummaryLabel.setText("<html><div style='padding: 10px; text-align: center; color: white;'><i>No draft picks available.</i></div></html>");
+            return;
+        }
+
+        Map<Integer, List<Integer>> picksByYear = new TreeMap<>();
+        for (DraftPick pick : draftPicks) {
+            picksByYear.computeIfAbsent(pick.getYear(), k -> new ArrayList<>()).add(pick.getRound());
+        }
+
+        StringBuilder sb = new StringBuilder("<html><div style='padding: 10px; text-align: left;'>"); // Align left
+        sb.append("<span style='font-size: 1.1em; font-weight: bold;'>Your Draft Picks:</span><br>");
+        for (Map.Entry<Integer, List<Integer>> entry : picksByYear.entrySet()) {
+            int year = entry.getKey();
+            List<Integer> rounds = entry.getValue();
+            Map<Integer, Long> roundCounts = rounds.stream()
+                    .collect(Collectors.groupingBy(r -> r, Collectors.counting()));
+
+            List<String> pickDescriptions = new ArrayList<>();
+            if (roundCounts.containsKey(1)) {
+                pickDescriptions.add(roundCounts.get(1) + "x 1st Round Pick");
+            }
+            if (roundCounts.containsKey(2)) {
+                pickDescriptions.add(roundCounts.get(2) + "x 2nd Round Pick");
+            }
+
+            sb.append("<br>")
+                    .append("<span style='font-weight: bold;'>").append(year).append(":</span> ")
+                    .append(String.join(", ", pickDescriptions));
+        }
+        sb.append("</div></html>");
+
+        draftPicksSummaryLabel.setText(sb.toString());
+    }
+
+
+    private JPanel createRoundedPanelForLabel(JLabel label) {
+        JPanel panel = new JPanel() {
+            @Override
+            protected void paintComponent(Graphics g) {
+                super.paintComponent(g);
+                Graphics2D g2 = (Graphics2D) g.create();
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g2.setColor(new Color(0, 0, 0, 100)); // Transparent black
+                g2.fillRoundRect(0, 0, getWidth(), getHeight(), 15, 15);
+                g2.dispose();
+            }
+        };
+        panel.setLayout(new FlowLayout(FlowLayout.CENTER, 0, 20));
+        panel.setOpaque(false);
+        label.setForeground(Color.WHITE);
+        label.setFont(new Font("Arial", Font.BOLD, 16));
+        panel.add(label);
+        return panel;
+    }
+
+
+    private void showAddPlayerForm() {
+        if (!isGodModeEnabled) {
+            JOptionPane.showMessageDialog(this, "Add Player is only available in God Mode.", "Access Denied", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+
+        if (team.size() >= maxTeamSize) {
+            JOptionPane.showMessageDialog(this, "Your team is full! Maximum " + maxTeamSize + " players.", "Team Full", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+
+        JDialog addDialog = new JDialog(this, "Add New Player", true);
+        configureDialog(addDialog, "Add New NBA Player", new Color(139, 0, 0));
+        addDialog.setSize(550, 650);
+        addDialog.setLocationRelativeTo(this);
+
+        JPanel formPanel = new JPanel(new GridBagLayout());
+        formPanel.setBackground(new Color(45, 45, 45));
+        formPanel.setBorder(new EmptyBorder(20, 30, 20, 30));
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(8, 10, 8, 10);
+        gbc.anchor = GridBagConstraints.WEST;
+
+        JTextField codeField = createStyledTextField(10);
+        JTextField nameField = createStyledTextField(20);
+        JComboBox<String> positionCombo = new JComboBox<>(new String[]{"PG", "SG", "SF", "PF", "C"});
+        positionCombo.setFont(new Font("Arial", Font.PLAIN, 14));
+        positionCombo.setBackground(new Color(60, 60, 60));
+        positionCombo.setForeground(Color.WHITE);
+
+        JSpinner salarySpinner = new JSpinner(new SpinnerNumberModel(5.0, 1.0, 50.0, 0.5));
+        JSpinner yearsSpinner = new JSpinner(new SpinnerNumberModel(2, 1, 6, 1));
+        JComboBox<String> statusCombo = new JComboBox<>(new String[]{"Healthy", "Injured"});
+        statusCombo.setFont(new Font("Arial", Font.PLAIN, 14));
+        statusCombo.setBackground(new Color(60, 60, 60));
+        statusCombo.setForeground(Color.WHITE);
+
+        JSpinner ppgSpinner = new JSpinner(new SpinnerNumberModel(15.0, 0.0, 40.0, 0.1));
+        JSpinner apgSpinner = new JSpinner(new SpinnerNumberModel(5.0, 0.0, 15.0, 0.1));
+        JSpinner rpgSpinner = new JSpinner(new SpinnerNumberModel(6.0, 0.0, 20.0, 0.1));
+
+        setSpinnerTextFieldColors(salarySpinner);
+        setSpinnerTextFieldColors(yearsSpinner);
+        setSpinnerTextFieldColors(ppgSpinner);
+        setSpinnerTextFieldColors(apgSpinner);
+        setSpinnerTextFieldColors(rpgSpinner);
+
+        addFormRow(formPanel, gbc, 0, "Player Code (3-4 chars):", codeField);
+        addFormRow(formPanel, gbc, 1, "Full Name:", nameField);
+        addFormRow(formPanel, gbc, 2, "Position:", positionCombo);
+        addFormRow(formPanel, gbc, 3, "Salary ($M):", salarySpinner);
+        addFormRow(formPanel, gbc, 4, "Contract Years:", yearsSpinner);
+        addFormRow(formPanel, gbc, 5, "Status:", statusCombo);
+        addFormRow(formPanel, gbc, 6, "Points Per Game:", ppgSpinner);
+        addFormRow(formPanel, gbc, 7, "Assists Per Game:", apgSpinner);
+        addFormRow(formPanel, gbc, 8, "Rebounds Per Game:", rpgSpinner);
+
+        addDialog.add(formPanel, BorderLayout.CENTER);
+
+        BorderLayout layout = (BorderLayout) addDialog.getContentPane().getLayout();
+        JPanel southPanel = (JPanel) layout.getLayoutComponent(BorderLayout.SOUTH);
+
+        if (southPanel != null) {
+            southPanel.removeAll();
+            southPanel.setLayout(new FlowLayout(FlowLayout.RIGHT));
+            southPanel.setBackground(new Color(30, 30, 30));
+            southPanel.setBorder(new EmptyBorder(10, 0, 15, 0));
+
+            JButton addBtn = createStyledButton("Add Player", new Color(34, 139, 34));
+            JButton cancelBtn = createStyledButton("Cancel", new Color(220, 20, 60));
+            cancelBtn.addActionListener(e -> addDialog.dispose());
+
+            addBtn.addActionListener(e -> {
+                try {
+                    String code = codeField.getText().trim();
+                    String name = nameField.getText().trim();
+                    String position = (String) positionCombo.getSelectedItem();
+                    int salary = (int) (((Double) salarySpinner.getValue()) * 1_000_000);
+                    int years = (Integer) yearsSpinner.getValue();
+                    String status = (String) statusCombo.getSelectedItem();
+                    double ppg = (Double) ppgSpinner.getValue();
+                    double apg = (Double) apgSpinner.getValue();
+                    double rpg = (Double) rpgSpinner.getValue();
+
+                    if (code.isEmpty() || name.isEmpty()) {
+                        showErrorDialog(addDialog, "Please fill in all required fields!");
+                        return;
+                    }
+
+                    for (Player p : market) {
+                        if (p.code.equalsIgnoreCase(code)) {
+                            showErrorDialog(addDialog, "Player code already exists in the market!");
+                            return;
+                        }
+                    }
+                    for (Player p : team) {
+                        if (p.code.equalsIgnoreCase(code)) {
+                            showErrorDialog(addDialog, "Player code already exists in your team!");
+                            return;
+                        }
+                    }
+
+                    Player newPlayer = new Player(code, name, position, salary, years, status, ppg, apg, rpg);
+                    market.add(newPlayer);
+                    originalMarket.add(new Player(newPlayer.code, newPlayer.name, newPlayer.position,
+                            newPlayer.salary, newPlayer.years, newPlayer.status,
+                            newPlayer.ppg, newPlayer.apg, newPlayer.rpg));
+
+                    savePlayerToFile(newPlayer);
+                    addTransactionLog("PLAYER_ADDED", newPlayer.name, newPlayer.salary, "New player added to market (God Mode)");
+
+                    showSuccessDialog(addDialog, "Player " + name + " added successfully!");
+                    addDialog.dispose();
+
+                } catch (Exception ex) {
+                    showErrorDialog(addDialog, "Error adding player: " + ex.getMessage());
+                }
+            });
+
+            southPanel.add(addBtn);
+            southPanel.add(cancelBtn);
+        }
+
+        addDialog.setVisible(true);
+    }
+
+    private void setSpinnerTextFieldColors(JSpinner spinner) {
+        JComponent editor = spinner.getEditor();
+        if (editor instanceof JSpinner.DefaultEditor) {
+            JFormattedTextField textField = ((JSpinner.DefaultEditor) editor).getTextField();
+            textField.setBackground(new Color(60, 60, 60));
+            textField.setForeground(Color.WHITE);
+            textField.setBorder(BorderFactory.createLineBorder(new Color(100, 100, 100), 1));
+        }
+    }
+
+
+    private JTextField createStyledTextField(int columns) {
+        JTextField field = new JTextField(columns);
+        field.setFont(new Font("Arial", Font.PLAIN, 14));
+        field.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(new Color(100, 100, 100)),
+                BorderFactory.createEmptyBorder(5, 8, 5, 8)
+        ));
+        field.setBackground(new Color(60, 60, 60));
+        field.setForeground(Color.WHITE);
+        return field;
+    }
+
+    private JButton createStyledButton(String text, Color color) {
+        JButton button = new JButton(text) {
+            @Override
+            protected void paintComponent(Graphics g) {
+                Graphics2D g2 = (Graphics2D) g.create();
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g2.setColor(color);
+                g2.fillRoundRect(0, 0, getWidth(), getHeight(), 15, 15);
+                g2.dispose();
+            }
+
+            @Override
+            public void paint(Graphics g) {
+                paintComponent(g);
+                Graphics2D g2 = (Graphics2D) g.create();
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g2.setColor(getForeground());
+                FontMetrics fm = g2.getFontMetrics();
+                int x = (getWidth() - fm.stringWidth(getText())) / 2;
+                int y = ((getHeight() - fm.getHeight()) / 2) + fm.getAscent();
+                g2.drawString(getText(), x, y);
+                g2.dispose();
+            }
+        };
+        button.setForeground(Color.WHITE);
+        button.setFont(new Font("Arial", Font.BOLD, 14));
+        button.setFocusPainted(false);
+        button.setBorderPainted(false);
+        button.setContentAreaFilled(false);
+        button.setPreferredSize(new Dimension(120, 35));
+        button.setCursor(new Cursor(Cursor.HAND_CURSOR));
+        return button;
+    }
+
+    private void addFormRow(JPanel panel, GridBagConstraints gbc, int row, String labelText, JComponent component) {
+        gbc.gridx = 0;
+        gbc.gridy = row;
+        JLabel label = new JLabel(labelText);
+        label.setFont(new Font("Arial", Font.BOLD, 14));
+        label.setForeground(Color.WHITE);
+        panel.add(label, gbc);
+
+        gbc.gridx = 1;
+        panel.add(component, gbc);
+    }
+
+    private void showErrorDialog(Component parent, String message) {
+        JOptionPane.showMessageDialog(parent, message, "Error", JOptionPane.ERROR_MESSAGE);
+    }
+
+    private void showSuccessDialog(Component parent, String message) {
+        JOptionPane.showMessageDialog(parent, message, "Success", JOptionPane.INFORMATION_MESSAGE);
+    }
+
+    private void savePlayerToFile(Player player) {
+        try (PrintWriter pw = new PrintWriter(new FileWriter(playerFile, true))) {
+            pw.println(player.code + "," + player.name + "," + player.position + "," +
+                    player.salary + "," + player.years + "," + player.status + "," +
+                    player.ppg + "," + player.apg + "," + player.rpg);
+        } catch (IOException e) {
+            JOptionPane.showMessageDialog(this, "Error saving player to file: " + e.getMessage());
+        }
+    }
+
+    private void showMoreOptions() {
+        JDialog moreDialog = new JDialog(this, "More Options", true);
+        configureDialog(moreDialog, "More Options", new Color(20, 20, 20));
+        moreDialog.setSize(900, 700);
+        moreDialog.setLocationRelativeTo(this);
+
+        JTabbedPane tabbedPane = new JTabbedPane();
+        tabbedPane.setFont(new Font("Arial", Font.BOLD, 14));
+        tabbedPane.setBackground(new Color(30, 30, 30));
+        tabbedPane.setForeground(Color.WHITE);
+
+        JPanel logPanel = new JPanel(new BorderLayout());
+        logPanel.setBackground(new Color(30, 30, 30));
+        logPanel.setBorder(new EmptyBorder(15, 15, 15, 15));
+
+        JLabel logTitle = new JLabel("Transaction History", SwingConstants.CENTER);
+        logTitle.setFont(new Font("Arial", Font.BOLD, 18));
+        logTitle.setForeground(new Color(255, 69, 0));
+        logTitle.setBorder(new EmptyBorder(0, 0, 15, 0));
+        logPanel.add(logTitle, BorderLayout.NORTH);
+
+        String[] logColumns = {"Date", "Type", "Player", "Amount", "Details"};
+        DefaultTableModel logModel = new DefaultTableModel(logColumns, 0);
+
+        for (TransactionLog log : transactionLogs) {
+            logModel.addRow(new Object[]{log.date, log.type, log.playerName,
+                    "$" + formatMoney(log.amount), log.details});
+        }
+
+        JTable logTable = new JTable(logModel);
+        logTable.setFont(new Font("Arial", Font.PLAIN, 16));
+        logTable.getTableHeader().setFont(new Font("Arial", Font.BOLD, 16));
+        logTable.getTableHeader().setBackground(Color.BLACK);
+        logTable.getTableHeader().setForeground(Color.WHITE);
+        logTable.setBackground(Color.BLACK);
+        logTable.setForeground(Color.WHITE);
+        logTable.setSelectionBackground(Color.DARK_GRAY);
+        logTable.setSelectionForeground(Color.WHITE);
+        logTable.setRowHeight(30);
+        logTable.setAutoResizeMode(JTable.AUTO_RESIZE_ALL_COLUMNS);
+        logTable.setDefaultRenderer(Object.class, new DarkThemeTableCellRenderer(team));
+
+        JScrollPane logScroll = new JScrollPane(logTable);
+        styleJScrollPane(logScroll, new Color(80, 0, 0), new Color(30, 30, 30)); // Apply custom scrollbar style with maroon
+        logScroll.setBorder(BorderFactory.createLineBorder(Color.GRAY, 2));
+        logPanel.add(logScroll, BorderLayout.CENTER);
+
+        JPanel logButtonPanel = new JPanel(new FlowLayout());
+        logButtonPanel.setBackground(new Color(30, 30, 30));
+        logButtonPanel.setBorder(new EmptyBorder(10, 0, 0, 0));
+
+        JButton clearLogsBtn = createStyledButton("Clear All Logs", new Color(220, 20, 60));
+        clearLogsBtn.setPreferredSize(new Dimension(180, 50));
+        clearLogsBtn.addActionListener(e -> {
+            int confirm = JOptionPane.showConfirmDialog(moreDialog,
+                    "Are you sure you want to clear all transaction logs?",
+                    "Confirm Clear", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+            if (confirm == JOptionPane.YES_OPTION) {
+                transactionLogs.clear();
+                logModel.setRowCount(0);
+                saveTransactionLogs();
+                JOptionPane.showMessageDialog(moreDialog, "Transaction logs cleared successfully!");
+                if (newsFeedTimer != null) newsFeedTimer.restart();
+            }
+        });
+        logButtonPanel.add(clearLogsBtn);
+        logPanel.add(logButtonPanel, BorderLayout.SOUTH);
+
+        tabbedPane.addTab("Transaction Logs", logPanel);
+
+        JPanel statsPanel = new JPanel(new BorderLayout());
+        statsPanel.setBackground(new Color(30, 30, 30));
+        statsPanel.setBorder(new EmptyBorder(20, 20, 20, 20));
+
+        JLabel statsTitle = new JLabel("Team Statistics", SwingConstants.CENTER);
+        statsTitle.setFont(new Font("Arial", Font.BOLD, 20));
+        statsTitle.setForeground(new Color(255, 69, 0));
+        statsTitle.setBorder(new EmptyBorder(0, 0, 20, 0));
+        statsPanel.add(statsTitle, BorderLayout.NORTH);
+
+        JPanel statsContent = new JPanel(new GridLayout(5, 2, 15, 15));
+        statsContent.setBackground(new Color(30, 30, 30));
+
+        double avgPPG = team.stream().mapToDouble(p -> p.ppg).average().orElse(0);
+        double avgAPG = team.stream().mapToDouble(p -> p.apg).average().orElse(0);
+        double avgRPG = team.stream().mapToDouble(p -> p.rpg).average().orElse(0);
+        double avgOVR = team.stream().mapToDouble(p -> p.getOverall()).average().orElse(0);
+        int healthyPlayers = (int) team.stream().filter(p -> p.status.equals("Healthy")).count();
+
+
+        addStatCard(statsContent, "Team", selectedTeam);
+        addStatCard(statsContent, "Current Season", String.valueOf(season));
+        addStatCard(statsContent, "Total Players", String.valueOf(team.size()));
+        addStatCard(statsContent, "Healthy Players", healthyPlayers + "/" + team.size());
+        addStatCard(statsContent, "Team Average PPG", String.format("%.1f", avgPPG));
+        addStatCard(statsContent, "Team Average APG", String.format("%.1f", avgAPG));
+        addStatCard(statsContent, "Team Average RPG", String.format("%.1f", avgRPG));
+        addStatCard(statsContent, "Team Average OVR", String.format("%.1f", avgOVR));
+        addStatCard(statsContent, "Championships", wonChampionship ? "1" : "0");
+        addStatCard(statsContent, "Playoff Appearances", madePlayoffs ? "1" : "0");
+
+
+        statsPanel.add(statsContent, BorderLayout.CENTER);
+        tabbedPane.addTab("Team Stats", statsPanel);
+
+        JPanel settingsPanel = new JPanel(new BorderLayout());
+        settingsPanel.setBackground(new Color(30, 30, 30));
+        settingsPanel.setBorder(new EmptyBorder(20, 20, 20, 20));
+
+        JLabel settingsTitle = new JLabel("Settings & Options", SwingConstants.CENTER);
+        settingsTitle.setFont(new Font("Arial", Font.BOLD, 20));
+        settingsTitle.setForeground(new Color(255, 69, 0));
+        settingsTitle.setBorder(new EmptyBorder(0, 0, 30, 0));
+        settingsPanel.add(settingsTitle, BorderLayout.NORTH);
+
+        JPanel settingsContent = new JPanel(new GridLayout(3, 1, 0, 20));
+        settingsContent.setBackground(new Color(30, 30, 30));
+
+        JButton changeTeamBtn = createStyledButton("Change Team", new Color(139, 0, 0));
+        changeTeamBtn.setPreferredSize(new Dimension(200, 50));
+        changeTeamBtn.addActionListener(e -> {
+            selectTeam();
+            teamNameLabel.setText(selectedTeam);
+            setTitle("Unified Finance Manager - " + selectedTeam);
+            resetGameData();
+            initializeRandomTeam();
+            refreshTable();
+            updateLabels();
+            addTransactionLog("TEAM_CHANGED", "N/A", 0, "Changed team to " + selectedTeam);
+            moreDialog.dispose();
+        });
+
+        JButton exportDataBtn = createStyledButton("Export Team Data", new Color(0, 128, 0));
+        exportDataBtn.setPreferredSize(new Dimension(200, 50));
+        exportDataBtn.addActionListener(e -> exportTeamData());
+
+        JButton backupBtn = createStyledButton("Create Backup", new Color(255, 140, 0));
+        backupBtn.setPreferredSize(new Dimension(200, 50));
+        backupBtn.addActionListener(e -> createBackup());
+
+        settingsContent.add(createCenteredPanel(changeTeamBtn));
+        settingsContent.add(createCenteredPanel(exportDataBtn));
+        settingsContent.add(createCenteredPanel(backupBtn));
+
+        if (isGodModeEnabled) {
+            JPanel godModeSettingsPanel = new JPanel(new GridLayout(3, 1, 0, 10));
+            godModeSettingsPanel.setBackground(new Color(30, 30, 30));
+            godModeSettingsPanel.setBorder(BorderFactory.createTitledBorder(BorderFactory.createLineBorder(Color.WHITE), "God Mode Settings", TitledBorder.CENTER, TitledBorder.TOP, new Font("Arial", Font.BOLD, 14), Color.WHITE));
+
+            JButton editPlayerOvrBtn = createStyledButton("Edit Player OVR (God Mode)", new Color(75, 0, 130));
+            editPlayerOvrBtn.setPreferredSize(new Dimension(220, 40));
+            editPlayerOvrBtn.addActionListener(e -> showGodModePlayerEditor());
+
+            JLabel budgetAdjustLabel = new JLabel("Adjust Budget ($M):", SwingConstants.CENTER);
+            budgetAdjustLabel.setForeground(Color.WHITE);
+            JSpinner budgetAdjustSpinner = new JSpinner(new SpinnerNumberModel(budget / 1_000_000.0, 1.0, 1000.0, 1.0));
+            setSpinnerTextFieldColors(budgetAdjustSpinner);
+            budgetAdjustSpinner.setFont(new Font("Arial", Font.PLAIN, 14));
+            budgetAdjustSpinner.addChangeListener(e -> {
+                budget = (int)(((Double)budgetAdjustSpinner.getValue()) * 1_000_000);
+                updateLabels();
+                addTransactionLog("GOD_MODE_EDIT", "Budget", budget, "Budget set to " + formatMoney(budget));
+            });
+            JPanel budgetPanel = new JPanel(new BorderLayout());
+            budgetPanel.setOpaque(false);
+            budgetPanel.add(budgetAdjustLabel, BorderLayout.WEST);
+            budgetPanel.add(budgetAdjustSpinner, BorderLayout.EAST);
+
+
+            JLabel maxPlayersLabel = new JLabel("Adjust Max Players:", SwingConstants.CENTER);
+            maxPlayersLabel.setForeground(Color.WHITE);
+            JSpinner maxPlayersSpinner = new JSpinner(new SpinnerNumberModel(maxTeamSize, 5, 30, 1));
+            setSpinnerTextFieldColors(maxPlayersSpinner);
+            maxPlayersSpinner.setFont(new Font("Arial", Font.PLAIN, 14));
+            maxPlayersSpinner.addChangeListener(e -> {
+                maxTeamSize = (Integer)maxPlayersSpinner.getValue();
+                addTransactionLog("GOD_MODE_EDIT", "Max Team Size", maxTeamSize, "Max players set to " + maxTeamSize);
+            });
+            JPanel maxPlayersPanel = new JPanel(new BorderLayout());
+            maxPlayersPanel.setOpaque(false);
+            maxPlayersPanel.add(maxPlayersLabel, BorderLayout.WEST);
+            maxPlayersPanel.add(maxPlayersSpinner, BorderLayout.EAST);
+
+            godModeSettingsPanel.add(editPlayerOvrBtn);
+            godModeSettingsPanel.add(budgetPanel);
+            godModeSettingsPanel.add(maxPlayersPanel);
+            settingsContent.add(godModeSettingsPanel);
+        }
+
+        settingsPanel.add(settingsContent, BorderLayout.CENTER);
+        tabbedPane.addTab("Settings", settingsPanel);
+
+        moreDialog.add(tabbedPane, BorderLayout.CENTER);
+        moreDialog.setVisible(true);
+    }
+
+    private void showGodModePlayerEditor() {
+        if (!isGodModeEnabled) return;
+
+        JDialog playerEditorDialog = new JDialog(this, "God Mode: Edit Player OVR", true);
+        configureDialog(playerEditorDialog, "Edit Player Overall (God Mode)", new Color(75, 0, 130));
+        playerEditorDialog.setSize(600, 400);
+        playerEditorDialog.setLocationRelativeTo(this);
+
+        String[] playerColumns = {"Name", "Position", "OVR"};
+        DefaultTableModel playerModel = new DefaultTableModel(playerColumns, 0) {
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                return column == 2;
+            }
+            @Override
+            public Class<?> getColumnClass(int columnIndex) {
+                if (columnIndex == 2) {
+                    return Integer.class;
+                }
+                return super.getColumnClass(columnIndex);
+            }
+        };
+
+        for (Player p : team) {
+            playerModel.addRow(new Object[]{p.name, p.position, p.getOverall()});
+        }
+
+        JTable playerTableEditor = new JTable(playerModel);
+        playerTableEditor.setFont(new Font("Arial", Font.PLAIN, 16));
+        playerTableEditor.setRowHeight(30);
+        playerTableEditor.getTableHeader().setFont(new Font("Arial", Font.BOLD, 16));
+        playerTableEditor.getTableHeader().setBackground(Color.BLACK);
+        playerTableEditor.getTableHeader().setForeground(Color.WHITE);
+        playerTableEditor.setBackground(Color.BLACK);
+        playerTableEditor.setForeground(Color.WHITE);
+        playerTableEditor.setSelectionBackground(Color.DARK_GRAY);
+        playerTableEditor.setSelectionForeground(Color.WHITE);
+        playerTableEditor.setDefaultRenderer(Object.class, new DarkThemeTableCellRenderer(team));
+
+        SpinnerNumberModel ovrSpinnerModel = new SpinnerNumberModel(70, 40, 99, 1);
+        playerTableEditor.getColumnModel().getColumn(2).setCellEditor(new SpinnerCellEditor(ovrSpinnerModel));
+
+        JScrollPane scrollPane = new JScrollPane(playerTableEditor);
+        styleJScrollPane(scrollPane, new Color(80, 0, 0), new Color(30, 30, 30)); // Apply custom scrollbar style with maroon
+        scrollPane.setBorder(BorderFactory.createLineBorder(Color.GRAY, 2));
+        playerEditorDialog.add(scrollPane, BorderLayout.CENTER);
+
+        playerModel.addTableModelListener(e -> {
+            if (e.getType() == TableModelEvent.UPDATE) {
+                int row = e.getFirstRow();
+                int column = e.getColumn();
+                if (column == 2) {
+                    String playerName = (String) playerModel.getValueAt(row, 0);
+                    Integer newOVR = (Integer) playerModel.getValueAt(row, 2);
+
+                    Player targetPlayer = team.stream().filter(p -> p.name.equals(playerName)).findFirst().orElse(null);
+                    if (targetPlayer != null && newOVR != null) {
+                        targetPlayer.setOverallOverride(newOVR);
+                        refreshTable();
+                        addTransactionLog("GOD_MODE_EDIT", targetPlayer.name, newOVR, "Set OVR to " + newOVR);
+                    }
+                }
+            }
+        });
+        playerEditorDialog.setVisible(true);
+    }
+
+    private JPanel createCenteredPanel(JComponent component) {
+        JPanel panel = new JPanel(new FlowLayout(FlowLayout.CENTER));
+        panel.setBackground(new Color(30, 30, 30));
+        panel.add(component);
+        return panel;
+    }
+
+    private void addStatCard(JPanel parent, String label, String value) {
+        JPanel card = new JPanel(new BorderLayout());
+        card.setBackground(new Color(60, 60, 60));
+        card.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(new Color(139, 0, 0), 1),
+                new EmptyBorder(10, 15, 10, 15)
+        ));
+
+        JLabel labelComp = new JLabel(label);
+        labelComp.setFont(new Font("Arial", Font.BOLD, 16));
+        labelComp.setForeground(new Color(255, 160, 122));
+
+        JLabel valueComp = new JLabel(value);
+        valueComp.setFont(new Font("Arial", Font.BOLD, 16));
+        valueComp.setForeground(Color.WHITE);
+        valueComp.setHorizontalAlignment(SwingConstants.RIGHT);
+
+        card.add(labelComp, BorderLayout.WEST);
+        card.add(valueComp, BorderLayout.EAST);
+        parent.add(card);
+    }
+
+    private void exportTeamData() {
+        JFileChooser fileChooser = new JFileChooser();
+        fileChooser.setSelectedFile(new File(selectedTeam.replaceAll(" ", "_") + "_team_data.csv"));
+        fileChooser.setDialogTitle("Export Team Data");
+
+        if (fileChooser.showSaveDialog(this) == JFileChooser.APPROVE_OPTION) {
+            File file = fileChooser.getSelectedFile();
+            try (PrintWriter pw = new PrintWriter(new FileWriter(file))) {
+                pw.println("Code,Name,Position,Salary,Years,Status,PPG,APG,RPG,Overall");
+
+                for (Player player : team) {
+                    pw.println(player.code + "," + player.name + "," + player.position + "," +
+                            player.salary + "," + player.years + "," + player.status + "," +
+                            player.ppg + "," + player.apg + "," + player.rpg + "," +
+                            player.getOverall());
+                }
+
+                JOptionPane.showMessageDialog(this,
+                        "Team data exported successfully to: " + file.getName(),
+                        "Export Complete", JOptionPane.INFORMATION_MESSAGE);
+
+                addTransactionLog("DATA_EXPORT", "Team Data Export", 0,
+                        "Exported team data to " + file.getName());
+
+            } catch (IOException e) {
+                JOptionPane.showMessageDialog(this,
+                        "Error exporting team data: " + e.getMessage(),
+                        "Export Error", JOptionPane.ERROR_MESSAGE);
+            }
+        }
+    }
+
+    private void createBackup() {
+        String timestamp = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
+        String backupDir = userSaveDir + "/backups";
+        File backupFolder = new File(backupDir);
+
+        if (!backupFolder.exists()) {
+            backupFolder.mkdirs();
+        }
+
+        try {
+            File backupFile = new File(backupDir + "/" + selectedTeam.replaceAll(" ", "_") +
+                    "_backup_" + timestamp + ".txt");
+            try (PrintWriter pw = new PrintWriter(new FileWriter(backupFile))) {
+                pw.println("TEAM:" + selectedTeam);
+                pw.println("BUDGET:" + budget);
+                pw.println("SEASON:" + season);
+                pw.println("WINS:" + wins);
+                pw.println("LOSSES:" + losses);
+                pw.println("PLAYOFFS:" + madePlayoffs);
+                pw.println("CHAMPIONSHIP:" + wonChampionship);
+                pw.println("IS_GOD_MODE:" + isGodModeEnabled);
+                pw.println("MAX_TEAM_SIZE:" + maxTeamSize);
+                pw.println("---TEAM_PLAYERS---");
+                for (Player p : team) {
+                    pw.println("PLAYER:" + p.code + "," + p.name + "," + p.position + "," +
+                            p.salary + "," + p.years + "," + p.status + "," +
+                            p.ppg + "," + p.apg + "," + p.rpg + "," + (p.overallOverride != null ? p.overallOverride : ""));
+                }
+                pw.println("---MARKET_PLAYERS---");
+                for (Player p : market) {
+                    boolean isOnTeam = team.stream().anyMatch(tp -> tp.code.equals(p.code));
+                    if (!isOnTeam) {
+                        pw.println("MARKET_PLAYER:" + p.code + "," + p.name + "," + p.position + "," +
+                                p.salary + "," + p.years + "," + p.status + "," +
+                                p.ppg + "," + p.apg + "," + p.rpg + "," + (p.overallOverride != null ? p.overallOverride : ""));
+                    }
+                }
+                pw.println("---TRANSACTION_LOGS---");
+                for (TransactionLog log : transactionLogs) {
+                    pw.println("LOG:" + log.date + "," + log.type + "," + log.playerName + "," +
+                            log.amount + "," + log.details.replace(",", "&#44;"));
+                }
+                pw.println("---DRAFT_PICKS---");
+                for (DraftPick pick : draftPicks) {
+                    pw.println("PICK:" + pick.year + "," + pick.round);
+                }
+                pw.println("---ACHIEVEMENTS---");
+                for (Achievement ach : achievements) {
+                    pw.println("ACHIEVEMENT:" + ach.name.replace(",", "&#44;") + "," + ach.isUnlocked);
+                }
+            }
+
+            JOptionPane.showMessageDialog(this,
+                    "Backup created successfully!\nFile: " + backupFile.getName(),
+                    "Backup Complete", JOptionPane.INFORMATION_MESSAGE);
+
+            addTransactionLog("SYSTEM_BACKUP", "Game Data Backup", 0,
+                    "Created backup: " + backupFile.getName());
+
+        } catch (IOException e) {
+            JOptionPane.showMessageDialog(this,
+                    "Error creating backup: " + e.getMessage(),
+                    "Backup Error", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    private void openTradeCenter() {
+        JDialog tradeCenterDialog = new JDialog(this, "Trade Center", true);
+        configureDialog(tradeCenterDialog, "Trade Center", new Color(139, 0, 0));
+        tradeCenterDialog.setSize(1200, 800);
+        tradeCenterDialog.setLocationRelativeTo(this);
+
+        JPanel tradePanel = createUnifiedTradePanel(tradeCenterDialog);
+        tradePanel.setBackground(new Color(30, 30, 30));
+        tradePanel.setOpaque(true);
+        tradeCenterDialog.add(tradePanel, BorderLayout.CENTER);
+
+        // Close button for the trade dialog, moved to south panel for consistency.
+        JPanel closePanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        closePanel.setBackground(new Color(30, 30, 30));
+        closePanel.setBorder(new EmptyBorder(10, 0, 10, 10));
+
+        JButton closeBtn = createStyledButton("Close", new Color(105, 105, 105));
+        closeBtn.addActionListener(e -> {
+            tradeCenterDialog.setVisible(false);
+            tradeCenterDialog.dispose();
+        });
+        closePanel.add(closeBtn);
+        tradeCenterDialog.add(closePanel, BorderLayout.SOUTH);
+
+        tradeCenterDialog.setVisible(true);
+    }
+
+    private JPanel createUnifiedTradePanel(JDialog parentDialog) {
+        JPanel panel = new JPanel(new GridBagLayout());
+        panel.setBackground(new Color(30, 30, 30));
+        panel.setOpaque(true);
+        panel.setBorder(new EmptyBorder(10, 10, 10, 10));
+
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(5, 5, 5, 5);
+        gbc.fill = GridBagConstraints.BOTH;
+        gbc.weightx = 1.0;
+        gbc.weighty = 1.0;
+
+        JPanel yourPlayersPanel = new JPanel(new BorderLayout());
+        yourPlayersPanel.setBorder(BorderFactory.createTitledBorder(BorderFactory.createLineBorder(Color.GRAY, 1),
+                "Your Players (Select up to 3)", TitledBorder.CENTER, TitledBorder.TOP, new Font("Arial", Font.BOLD, 14), Color.WHITE));
+        yourPlayersPanel.setBackground(new Color(40, 40, 40));
+
+        String[] playerColumns = {"Name", "Pos", "OVR", "Salary", "Years"};
+        DefaultTableModel yourPlayersModel = new DefaultTableModel(playerColumns, 0) {
+            @Override
+            public boolean isCellEditable(int row, int column) { return false; }
+        };
+        for (Player p : team) {
+            yourPlayersModel.addRow(new Object[]{p.name, p.position, p.getOverall(), "$" + formatMoney(p.salary), p.years});
+        }
+        JTable yourPlayersTable = new JTable(yourPlayersModel);
+        yourPlayersTable.setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION); // Allow multiple selection
+        yourPlayersTable.setDefaultRenderer(Object.class, new DarkThemeTableCellRenderer(team));
+        yourPlayersTable.getTableHeader().setBackground(Color.BLACK);
+        yourPlayersTable.getTableHeader().setForeground(Color.WHITE);
+        yourPlayersTable.setBackground(Color.BLACK);
+        yourPlayersTable.setForeground(Color.WHITE);
+        yourPlayersTable.setSelectionBackground(new Color(80, 0, 0));
+        yourPlayersTable.setSelectionForeground(Color.WHITE);
+        yourPlayersTable.setRowHeight(30);
+        yourPlayersTable.setFont(new Font("Arial", Font.PLAIN, 16));
+        yourPlayersTable.getTableHeader().setFont(new Font("Arial", Font.BOLD, 16));
+        JScrollPane yourPlayersScroll = new JScrollPane(yourPlayersTable);
+        styleJScrollPane(yourPlayersScroll, new Color(80, 0, 0), new Color(30, 30, 30)); // Apply custom scrollbar style with maroon
+        yourPlayersPanel.add(yourPlayersScroll, BorderLayout.CENTER);
+
+        gbc.gridx = 0;
+        gbc.gridy = 0;
+        gbc.gridwidth = 1;
+        gbc.gridheight = 1;
+        panel.add(yourPlayersPanel, gbc);
+
+        JPanel yourPicksPanel = new JPanel(new BorderLayout());
+        yourPicksPanel.setBorder(BorderFactory.createTitledBorder(BorderFactory.createLineBorder(Color.GRAY, 1),
+                "Your Draft Picks (Select Multiple)", TitledBorder.CENTER, TitledBorder.TOP, new Font("Arial", Font.BOLD, 14), Color.WHITE));
+        yourPicksPanel.setBackground(new Color(40, 40, 40));
+
+        String[] pickColumns = {"Year", "Round", "Base Value"};
+        DefaultTableModel yourPicksModel = new DefaultTableModel(pickColumns, 0) {
+            @Override
+            public boolean isCellEditable(int row, int column) { return false; }
+        };
+        draftPicks.sort(Comparator.comparingInt(DraftPick::getYear).thenComparingInt(DraftPick::getRound));
+        for (DraftPick pick : draftPicks) {
+            yourPicksModel.addRow(new Object[]{pick.getYear(), pick.getRound() + (pick.getRound() == 1 ? "st" : "nd"), getDraftPickValueBase(pick)});
+        }
+        JTable yourPicksTable = new JTable(yourPicksModel);
+        yourPicksTable.setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
+        yourPicksTable.setDefaultRenderer(Object.class, new DarkThemeTableCellRenderer(team));
+        yourPicksTable.getTableHeader().setBackground(Color.BLACK);
+        yourPicksTable.getTableHeader().setForeground(Color.WHITE);
+        yourPicksTable.setBackground(Color.BLACK);
+        yourPicksTable.setForeground(Color.WHITE);
+        yourPicksTable.setSelectionBackground(new Color(80, 0, 0));
+        yourPicksTable.setSelectionForeground(Color.WHITE);
+        yourPicksTable.setRowHeight(30);
+        yourPicksTable.setFont(new Font("Arial", Font.PLAIN, 16));
+        yourPicksTable.getTableHeader().setFont(new Font("Arial", Font.BOLD, 16));
+        JScrollPane yourPicksScroll = new JScrollPane(yourPicksTable);
+        styleJScrollPane(yourPicksScroll, new Color(80, 0, 0), new Color(30, 30, 30)); // Apply custom scrollbar style with maroon
+        yourPicksPanel.add(yourPicksScroll, BorderLayout.CENTER);
+
+        gbc.gridx = 0;
+        gbc.gridy = 1;
+        panel.add(yourPicksPanel, gbc);
+
+        JPanel targetPlayersPanel = new JPanel(new BorderLayout());
+        targetPlayersPanel.setBorder(BorderFactory.createTitledBorder(BorderFactory.createLineBorder(Color.GRAY, 1),
+                "Target Players (from Market - Select up to 3)", TitledBorder.CENTER, TitledBorder.TOP, new Font("Arial", Font.BOLD, 14), Color.WHITE));
+        targetPlayersPanel.setBackground(new Color(40, 40, 40));
+
+        String[] marketColumns = {"Name", "Pos", "OVR", "Salary", "Years"};
+        DefaultTableModel marketModel = new DefaultTableModel(marketColumns, 0) {
+            @Override
+            public boolean isCellEditable(int row, int column) { return false; }
+        };
+        List<Player> availableMarketForTrade = new ArrayList<>(); // Regenerate market players based on chances
+        generatePlayersForMarket(marketModel, availableMarketForTrade, 30, true); // Generate 30 players for the market with trade-specific chances
+        JTable marketTable = new JTable(marketModel);
+        marketTable.setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION); // Allow multiple selection
+        marketTable.setDefaultRenderer(Object.class, new DarkThemeTableCellRenderer(availableMarketForTrade));
+        marketTable.getTableHeader().setBackground(Color.BLACK);
+        marketTable.getTableHeader().setForeground(Color.WHITE);
+        marketTable.setBackground(Color.BLACK);
+        marketTable.setForeground(Color.WHITE);
+        marketTable.setSelectionBackground(new Color(80, 0, 0));
+        marketTable.setSelectionForeground(Color.WHITE);
+        marketTable.setRowHeight(30);
+        marketTable.setFont(new Font("Arial", Font.PLAIN, 16));
+        marketTable.getTableHeader().setFont(new Font("Arial", Font.BOLD, 16));
+        JScrollPane marketScroll = new JScrollPane(marketTable);
+        styleJScrollPane(marketScroll, new Color(80, 0, 0), new Color(30, 30, 30)); // Apply custom scrollbar style with maroon
+        targetPlayersPanel.add(marketScroll, BorderLayout.CENTER);
+
+        gbc.gridx = 1;
+        gbc.gridy = 0;
+        gbc.gridheight = 2;
+        panel.add(targetPlayersPanel, gbc);
+
+        // Offer Value and Trade Button Panel
+        JPanel tradeActionPanel = new JPanel(new BorderLayout());
+        tradeActionPanel.setOpaque(false);
+
+        JLabel offerValueLabel = new JLabel("Total Offer Value: 0 OVR", SwingConstants.LEFT);
+        offerValueLabel.setForeground(Color.CYAN);
+        offerValueLabel.setFont(new Font("Arial", Font.BOLD, 16));
+        offerValueLabel.setBorder(new EmptyBorder(0, 10, 0, 0)); // Padding from left edge
+
+        JPanel leftBottomPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        leftBottomPanel.setOpaque(false);
+        leftBottomPanel.add(offerValueLabel);
+
+        JPanel rightBottomPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        rightBottomPanel.setOpaque(false);
+        proposeTradeBtn = createStyledButton("Propose Trade", new Color(34, 139, 34));
+        proposeTradeBtn.setPreferredSize(new Dimension(160, 35));
+        rightBottomPanel.add(proposeTradeBtn);
+
+        tradeActionPanel.add(leftBottomPanel, BorderLayout.WEST);
+        tradeActionPanel.add(rightBottomPanel, BorderLayout.EAST);
+
+        gbc.gridx = 0;
+        gbc.gridy = 2;
+        gbc.gridwidth = 2;
+        gbc.weighty = 0.0;
+        panel.add(tradeActionPanel, gbc);
+
+
+        // Listeners for updating offer value
+        ListSelectionListener tradeSelectionListener = e -> {
+            if (!e.getValueIsAdjusting()) {
+                List<Player> selectedOfferedPlayers = new ArrayList<>();
+                for (int viewRow : yourPlayersTable.getSelectedRows()) {
+                    String playerName = (String) yourPlayersTable.getValueAt(viewRow, 0);
+                    team.stream().filter(p -> p.name.equals(playerName)).findFirst().ifPresent(selectedOfferedPlayers::add);
+                }
+                List<DraftPick> selectedOfferedPicks = new ArrayList<>();
+                for (int viewRow : yourPicksTable.getSelectedRows()) {
+                    int modelPickRow = yourPicksTable.convertRowIndexToModel(viewRow);
+                    selectedOfferedPicks.add(draftPicks.get(modelPickRow));
+                }
+                double currentOfferValue = calculateOverallOfferValue(selectedOfferedPlayers, selectedOfferedPicks);
+                offerValueLabel.setText(String.format("Total Offer Value: %.1f OVR", currentOfferValue));
+            }
+        };
+
+        yourPlayersTable.getSelectionModel().addListSelectionListener(tradeSelectionListener);
+        yourPicksTable.getSelectionModel().addListSelectionListener(tradeSelectionListener);
+
+
+        tradeCooldownTimer = new Timer(20 * 1000, new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                proposeTradeBtn.setEnabled(true);
+                proposeTradeBtn.setText("Propose Trade");
+                tradeCooldownTimer.stop();
+            }
+        });
+        tradeCooldownTimer.setRepeats(false);
+
+
+        proposeTradeBtn.addActionListener(e -> {
+            if (!isGodModeEnabled && tradeCooldownTimer.isRunning()) { // Check timer directly
+                return; // Button is on cooldown
+            }
+
+            int[] selectedPlayerFromTeamRows = yourPlayersTable.getSelectedRows();
+            int[] selectedPickRows = yourPicksTable.getSelectedRows();
+            int[] selectedTargetPlayerRows = marketTable.getSelectedRows();
+
+            if (selectedTargetPlayerRows.length == 0) {
+                JOptionPane.showMessageDialog(parentDialog, "Please select at least one player from the market to acquire.", "Selection Error", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+            if (selectedPlayerFromTeamRows.length > 3 || selectedTargetPlayerRows.length > 3) {
+                JOptionPane.showMessageDialog(parentDialog, "You can select a maximum of 3 players on each side for a trade.", "Selection Limit", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+
+
+            List<Player> offeredPlayers = new ArrayList<>();
+            for (int viewRow : selectedPlayerFromTeamRows) {
+                String playerName = (String) yourPlayersTable.getValueAt(viewRow, 0);
+                team.stream().filter(p -> p.name.equals(playerName)).findFirst().ifPresent(offeredPlayers::add);
+            }
+
+            List<DraftPick> offeredPicks = new ArrayList<>();
+            for (int viewRow : selectedPickRows) {
+                int modelPickRow = yourPicksTable.convertRowIndexToModel(viewRow);
+                offeredPicks.add(draftPicks.get(modelPickRow));
+            }
+
+            List<Player> targetPlayers = new ArrayList<>();
+            for (int viewRow : selectedTargetPlayerRows) {
+                int modelTargetPlayerRow = marketTable.convertRowIndexToModel(viewRow);
+                targetPlayers.add(availableMarketForTrade.get(modelTargetPlayerRow));
+            }
+
+            if (offeredPlayers.isEmpty() && offeredPicks.isEmpty()) {
+                JOptionPane.showMessageDialog(parentDialog, "You must offer at least one player or one draft pick.", "Invalid Offer", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+            // Check if offering to trade a player already selected as target player
+            for (Player offeredP : offeredPlayers) {
+                if (targetPlayers.contains(offeredP)) {
+                    JOptionPane.showMessageDialog(parentDialog, "You cannot offer a player you are trying to acquire.", "Invalid Trade", JOptionPane.WARNING_MESSAGE);
+                    return;
+                }
+            }
+
+
+            double offerValue = calculateOverallOfferValue(offeredPlayers, offeredPicks);
+            double targetValue = calculateOverallOfferValue(targetPlayers, new ArrayList<>()); // No picks for target side
+
+            long netSalaryChange = 0;
+            for (Player tp : targetPlayers) netSalaryChange -= tp.salary;
+            for (Player op : offeredPlayers) netSalaryChange += op.salary;
+
+            if (budget + netSalaryChange < 0 && !isGodModeEnabled) {
+                JOptionPane.showMessageDialog(parentDialog,
+                        String.format("Not enough budget! This trade results in a deficit of $%.1fM.", Math.abs(netSalaryChange) / 1_000_000.0),
+                        "Budget Error", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+
+            // Simplified trade acceptance logic for multiple players (can be complex)
+            double tradeAcceptanceChance = 0.5 + (offerValue - targetValue) * 0.02; // 2% chance boost per OVR difference
+            tradeAcceptanceChance = Math.max(0.05, Math.min(0.95, tradeAcceptanceChance));
+
+            boolean tradeAccepted = random.nextDouble() < tradeAcceptanceChance || isGodModeEnabled;
+
+            String tradeMessage;
+            if (tradeAccepted) {
+                for (Player tp : targetPlayers) {
+                    team.add(tp);
+                    market.removeIf(p -> p.code.equals(tp.code));
+                }
+                for (Player op : offeredPlayers) {
+                    team.remove(op);
+                    market.add(op);
+                }
+                draftPicks.removeAll(offeredPicks);
+                budget += netSalaryChange;
+
+                addTransactionLog("TRADE",
+                        "Traded " + (offeredPlayers.isEmpty() ? "" : offeredPlayers.size() + " players ") +
+                                (offeredPicks.isEmpty() ? "" : (offeredPlayers.isEmpty() ? "" : "+ ") + offeredPicks.size() + " picks ") +
+                                " for " + targetPlayers.size() + " players",
+                        Math.abs(netSalaryChange),
+                        String.format("Accepted trade. Offered Value: %.1f, Target Value: %.1f", offerValue, targetValue));
+
+                tradeMessage = "Trade successful! Acquired " + targetPlayers.stream().map(p -> p.name).collect(Collectors.joining(", ")) + ".";
+                JOptionPane.showMessageDialog(parentDialog, tradeMessage, "Trade Result", JOptionPane.INFORMATION_MESSAGE);
+
+                if (!isGodModeEnabled) {
+                    proposeTradeBtn.setEnabled(false);
+                    tradeCooldownTimer.start();
+                    new Timer(1000, new ActionListener() {
+                        int timeLeft = 20;
+                        @Override
+                        public void actionPerformed(ActionEvent e) {
+                            proposeTradeBtn.setText("Propose Trade (" + timeLeft + "s)");
+                            timeLeft--;
+                            if (timeLeft < 0) {
+                                ((Timer)e.getSource()).stop();
+                            }
+                        }
+                    }).start();
+                }
+
+                refreshTable();
+                updateLabels();
+                updateDraftPicksSummary();
+                if (newsFeedTimer != null) newsFeedTimer.restart();
+                parentDialog.dispose();
+            } else {
+                tradeMessage = String.format("Trade rejected. Your offer (%.1f OVR equivalent) was not enough for the target players (%.1f OVR equivalent).", offerValue, targetValue);
+                JOptionPane.showMessageDialog(parentDialog, tradeMessage, "Trade Result", JOptionPane.INFORMATION_MESSAGE);
+
+                if (!isGodModeEnabled) {
+                    proposeTradeBtn.setEnabled(false);
+                    tradeCooldownTimer.start();
+                    new Timer(1000, new ActionListener() {
+                        int timeLeft = 20;
+                        @Override
+                        public void actionPerformed(ActionEvent e) {
+                            proposeTradeBtn.setText("Propose Trade (" + timeLeft + "s)");
+                            timeLeft--;
+                            if (timeLeft < 0) {
+                                ((Timer)e.getSource()).stop();
+                            }
+                        }
+                    }).start();
+                }
+            }
+        });
+
+        return panel;
+    }
+
+
+    private double calculateOverallOfferValue(List<Player> players, List<DraftPick> picks) {
+        double totalValue = 0;
+        for (Player p : players) {
+            totalValue += p.getOverall();
+        }
+        for (DraftPick pick : picks) {
+            totalValue += getDraftPickValueBase(pick) * 0.1; // Scale down pick value for overall equivalent
+        }
+        return totalValue;
+    }
+
+    // Function to get a player based on a target OVR and market type (FA or Trade)
+    private Player getRandomPlayerByOverallChance(boolean forMarket, boolean forTradeMarket) {
+        // Define OVR probability distributions
+        Map<String, Double> overallChances = new LinkedHashMap<>();
+        if (forTradeMarket) { // Market with 30 players, even lower chances for high OVR
+            overallChances.put("99", 0.0005);
+            overallChances.put("95-98", 0.005);
+            overallChances.put("90-94", 0.01);
+            overallChances.put("85-89", 0.025);
+            overallChances.put("80-84", 0.05);
+            overallChances.put("70-79", 0.15);
+            overallChances.put("60-69", 0.25);
+            overallChances.put("<60", 0.5195);
+        } else if (forMarket) { // Free Agent offers with 15 players
+            overallChances.put("99", 0.005);
+            overallChances.put("95-98", 0.02);
+            overallChances.put("90-94", 0.05);
+            overallChances.put("85-89", 0.10);
+            overallChances.put("80-84", 0.20);
+            overallChances.put("70-79", 0.30);
+            overallChances.put("60-69", 0.20);
+            overallChances.put("<60", 0.125);
+        } else { // Default original logic
+            overallChances.put("99+", 0.005);
+            overallChances.put("95-98", 0.02);
+            overallChances.put("90-94", 0.05);
+            overallChances.put("85-89", 0.10);
+            overallChances.put("80-84", 0.20);
+            overallChances.put("70-79", 0.30);
+            overallChances.put("60-69", 0.20);
+            overallChances.put("<60", 0.125);
+        }
+
+        double rand = random.nextDouble();
+        double cumulativeChance = 0.0;
+        String targetOvrRange = "";
+
+        for (Map.Entry<String, Double> entry : overallChances.entrySet()) {
+            cumulativeChance += entry.getValue();
+            if (rand < cumulativeChance) {
+                targetOvrRange = entry.getKey();
+                break;
+            }
+        }
+
+        List<Player> availablePlayers = market.stream()
+                .filter(p -> !team.contains(p))
+                .collect(Collectors.toList());
+
+        // Try to find a player within the target OVR range
+        List<Player> candidates = new ArrayList<>();
+        for (Player p : availablePlayers) {
+            int ovr = p.getOverall();
+            boolean matches = false;
+            switch (targetOvrRange) {
+                case "99": matches = (ovr == 99); break;
+                case "99+": matches = (ovr == 99); break; // For backward compatibility if needed
+                case "95-98": matches = (ovr >= 95 && ovr <= 98); break;
+                case "90-94": matches = (ovr >= 90 && ovr <= 94); break;
+                case "85-89": matches = (ovr >= 85 && ovr <= 89); break;
+                case "80-84": matches = (ovr >= 80 && ovr <= 84); break;
+                case "70-79": matches = (ovr >= 70 && ovr <= 79); break;
+                case "60-69": matches = (ovr >= 60 && ovr <= 69); break;
+                case "<60": matches = (ovr < 60); break;
+            }
+            if (matches) {
+                candidates.add(p);
+            }
+        }
+
+        if (!candidates.isEmpty()) {
+            return candidates.get(random.nextInt(candidates.size()));
+        }
+
+        // If no player matches the ideal OVR range, fall back to any available player
+        if (!availablePlayers.isEmpty()) {
+            return availablePlayers.get(random.nextInt(availablePlayers.size()));
+        }
+        return null;
+    }
+
+
+    private void openPlayerMarket() {
+        JDialog marketDialog = new JDialog(this, "Player Market", true);
+        configureDialog(marketDialog, "NBA Player Market", new Color(139, 0, 0));
+        marketDialog.setSize(1200, 700);
+        marketDialog.setLocationRelativeTo(null);
+
+        JPanel contentPanel = new JPanel(new BorderLayout());
+        contentPanel.setBackground(new Color(30, 30, 30));
+        contentPanel.setOpaque(true);
+        contentPanel.setBorder(new EmptyBorder(10, 10, 10, 10));
+
+        JPanel searchAndRefreshPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        searchAndRefreshPanel.setBackground(new Color(30, 30, 30));
+        searchAndRefreshPanel.setBorder(new EmptyBorder(0, 0, 10, 0));
+        JLabel searchLabel = new JLabel("Search Player:");
+        searchLabel.setFont(new Font("Arial", Font.PLAIN, 14));
+        searchLabel.setForeground(Color.WHITE);
+        JTextField searchField = new JTextField(30);
+        searchField.setFont(new Font("Arial", Font.PLAIN, 14));
+        searchField.setBackground(new Color(60, 60, 60));
+        searchField.setForeground(Color.WHITE);
+        searchAndRefreshPanel.add(searchLabel);
+        searchAndRefreshPanel.add(searchField);
+
+        // Market refresh button with cooldown
+        JButton marketRefreshBtn = createStyledButton("Refresh Market", new Color(255, 140, 0));
+        marketRefreshBtn.setPreferredSize(new Dimension(180, 35));
+        searchAndRefreshPanel.add(marketRefreshBtn);
+        contentPanel.add(searchAndRefreshPanel, BorderLayout.NORTH);
+
+        String[] columns = {"Name", "Pos", "Salary", "Years", "Status", "PPG", "APG", "RPG", "OVR"};
+        DefaultTableModel marketModel = new DefaultTableModel(columns, 0) {
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                return false;
+            }
+        };
+
+        List<Player> availablePlayersForMarket = new ArrayList<>();
+        generatePlayersForMarket(marketModel, availablePlayersForMarket, 30, true); // Generate 30 players for market
+
+        JTable marketTable = new JTable(marketModel);
+        marketTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        marketTable.setFont(new Font("Arial", Font.PLAIN, 16));
+        marketTable.setRowHeight(30);
+        marketTable.getTableHeader().setFont(new Font("Arial", Font.BOLD, 16));
+        marketTable.getTableHeader().setBackground(Color.BLACK);
+        marketTable.getTableHeader().setForeground(Color.WHITE);
+        marketTable.setBackground(Color.BLACK);
+        marketTable.setForeground(Color.WHITE);
+        marketTable.setSelectionBackground(Color.DARK_GRAY);
+        marketTable.setSelectionForeground(Color.WHITE);
+        marketTable.setFillsViewportHeight(true);
+        marketTable.setDefaultRenderer(Object.class, new DarkThemeTableCellRenderer(availablePlayersForMarket));
+
+
+        TableRowSorter<DefaultTableModel> marketSorter = new TableRowSorter<>(marketModel);
+        marketTable.setRowSorter(marketSorter);
+        JScrollPane scrollPane = new JScrollPane(marketTable);
+        styleJScrollPane(scrollPane, new Color(80, 0, 0), new Color(30, 30, 30)); // Apply custom scrollbar style with maroon
+        scrollPane.setBorder(BorderFactory.createLineBorder(Color.GRAY, 2));
+        contentPanel.add(scrollPane, BorderLayout.CENTER);
+
+        searchField.getDocument().addDocumentListener(new DocumentListener() {
+            private void filterTable() {
+                String text = searchField.getText();
+                if (text.trim().length() == 0) {
+                    marketSorter.setRowFilter(null);
+                } else {
+                    String lowerCaseText = text.toLowerCase();
+                    marketSorter.setRowFilter(new RowFilter<DefaultTableModel, Object>() {
+                        @Override
+                        public boolean include(Entry<? extends DefaultTableModel, ? extends Object> entry) {
+                            return entry.getStringValue(0).toLowerCase().contains(lowerCaseText) ||
+                                    entry.getStringValue(1).toLowerCase().contains(lowerCaseText) ||
+                                    entry.getStringValue(4).toLowerCase().contains(lowerCaseText) ||
+                                    entry.getStringValue(8).toLowerCase().contains(lowerCaseText);
+                        }
+                    });
+                }
+            }
+            @Override public void insertUpdate(DocumentEvent e) { filterTable(); }
+            @Override public void removeUpdate(DocumentEvent e) { filterTable(); }
+            @Override public void changedUpdate(DocumentEvent e) { filterTable(); }
+        });
+
+        BorderLayout layout = (BorderLayout) marketDialog.getContentPane().getLayout();
+        JPanel southPanel = (JPanel) layout.getLayoutComponent(BorderLayout.SOUTH);
+
+        if (southPanel != null) {
+            southPanel.removeAll();
+            southPanel.setLayout(new FlowLayout(FlowLayout.RIGHT));
+            southPanel.setBackground(new Color(30, 30, 30));
+            southPanel.setBorder(new EmptyBorder(10, 0, 10, 10));
+
+            JButton signBtn = createStyledButton("Negotiate & Sign Player", new Color(34, 139, 34));
+            signBtn.setPreferredSize(new Dimension(200, 35));
+            signBtn.addActionListener(e -> {
+                int selectedRow = marketTable.getSelectedRow();
+                if (selectedRow == -1) {
+                    JOptionPane.showMessageDialog(marketDialog, "Please select a player to negotiate with!");
+                    return;
+                }
+
+                int modelRow = marketTable.convertRowIndexToModel(selectedRow);
+                Player selectedPlayer = availablePlayersForMarket.get(modelRow);
+
+                negotiatePlayer(selectedPlayer, marketDialog, marketModel);
+            });
+
+            JButton closeBtn = createStyledButton("Close", new Color(105, 105, 105));
+            closeBtn.addActionListener(e -> marketDialog.dispose());
+
+            southPanel.add(signBtn);
+            southPanel.add(closeBtn);
+        }
+
+        // Cooldown for Market Refresh Button
+        Timer marketCooldownTimer = new Timer(5 * 60 * 1000, new ActionListener() { // 5 minutes cooldown
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                marketRefreshBtn.setEnabled(true);
+                marketRefreshBtn.setText("Refresh Market");
+                ((Timer)e.getSource()).stop();
+            }
+        });
+        marketCooldownTimer.setRepeats(false);
+
+        marketRefreshBtn.addActionListener(e -> {
+            if (!isGodModeEnabled && marketCooldownTimer.isRunning()) {
+                return; // Button is on cooldown
+            }
+            generatePlayersForMarket(marketModel, availablePlayersForMarket, 30, true);
+            if (!isGodModeEnabled) {
+                marketRefreshBtn.setEnabled(false);
+                marketCooldownTimer.start();
+                new Timer(1000, new ActionListener() {
+                    int timeLeft = 300; // 5 minutes
+                    @Override
+                    public void actionPerformed(ActionEvent e) {
+                        marketRefreshBtn.setText("Refresh Market (" + timeLeft + "s)");
+                        timeLeft--;
+                        if (timeLeft < 0) {
+                            ((Timer)e.getSource()).stop();
+                        }
+                    }
+                }).start();
+            }
+        });
+
+
+        marketDialog.add(contentPanel, BorderLayout.CENTER);
+        marketDialog.setVisible(true);
+    }
+
+    private void generatePlayersForMarket(DefaultTableModel model, List<Player> targetList, int count, boolean forTradeMarket) {
+        model.setRowCount(0);
+        targetList.clear();
+
+        for (int i = 0; i < count; i++) {
+            Player p = getRandomPlayerByOverallChance(true, forTradeMarket); // Use different chances for market vs free agents
+            if (p != null) {
+                targetList.add(p);
+                model.addRow(new Object[]{
+                        p.name, p.position, "$" + formatMoney(p.salary), p.years + " yrs",
+                        p.status, String.format("%.1f", p.ppg), String.format("%.1f", p.apg), String.format("%.1f", p.rpg), p.getOverall()
+                });
+            }
+        }
+    }
+
+
+    private void negotiatePlayer(Player player, JDialog parentDialog, DefaultTableModel marketTableModel) {
+        JDialog negotiateDialog = new JDialog(this, "Negotiate Contract", true);
+        configureDialog(negotiateDialog, "Negotiate Contract for " + player.name, new Color(139, 0, 0));
+        negotiateDialog.setSize(550, 400);
+        negotiateDialog.setLocationRelativeTo(parentDialog);
+
+        JPanel negotiationPanel = new JPanel(new GridBagLayout());
+        negotiationPanel.setBackground(new Color(30, 30, 30));
+        negotiationPanel.setOpaque(true);
+        negotiationPanel.setBorder(new EmptyBorder(20, 20, 20, 20));
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(10, 10, 10, 10);
+        gbc.anchor = GridBagConstraints.WEST;
+
+        JLabel playerInfoLabel = new JLabel("<html><b>" + player.name + " (" + player.position + ") - OVR " + player.getOverall() + "</b><br>" +
+                "Current Demand: $" + formatMoney(player.salary) + " for " + player.years + " years</html>");
+        playerInfoLabel.setForeground(Color.WHITE);
+        playerInfoLabel.setFont(new Font("Segoe UI", Font.BOLD, 16));
+        gbc.gridx = 0;
+        gbc.gridy = 0;
+        gbc.gridwidth = 2;
+        gbc.anchor = GridBagConstraints.CENTER;
+        negotiationPanel.add(playerInfoLabel, gbc);
+
+        gbc.gridwidth = 1;
+        gbc.anchor = GridBagConstraints.WEST;
+        gbc.gridy = 1;
+
+        JLabel salaryLabel = new JLabel("Offer Salary ($M):");
+        salaryLabel.setForeground(Color.WHITE);
+        salaryLabel.setFont(new Font("Segoe UI", Font.BOLD, 14));
+        gbc.gridx = 0;
+        negotiationPanel.add(salaryLabel, gbc);
+
+        JSpinner salarySpinner = new JSpinner(new SpinnerNumberModel(player.salary / 1_000_000.0, 1.0, 60.0, 0.5));
+        salarySpinner.setFont(new Font("Segoe UI", Font.PLAIN, 14));
+        setSpinnerTextFieldColors(salarySpinner);
+        ((JSpinner.DefaultEditor) salarySpinner.getEditor()).getTextField().setColumns(8);
+        gbc.gridx = 1;
+        negotiationPanel.add(salarySpinner, gbc);
+
+        JLabel yearsLabel = new JLabel("Contract Years:");
+        yearsLabel.setForeground(Color.WHITE);
+        yearsLabel.setFont(new Font("Segoe UI", Font.BOLD, 14));
+        gbc.gridx = 0;
+        gbc.gridy = 2;
+        negotiationPanel.add(yearsLabel, gbc);
+
+        JSpinner yearsSpinner = new JSpinner(new SpinnerNumberModel(Math.max(1, player.years), 1, 7, 1));
+        yearsSpinner.setFont(new Font("Segoe UI", Font.PLAIN, 14));
+        setSpinnerTextFieldColors(yearsSpinner);
+        ((JSpinner.DefaultEditor) yearsSpinner.getEditor()).getTextField().setColumns(3);
+        gbc.gridx = 1;
+        negotiationPanel.add(yearsSpinner, gbc);
+
+        JLabel reactionLabel = new JLabel("Player's Reaction: Neutral");
+        reactionLabel.setForeground(Color.CYAN);
+        reactionLabel.setFont(new Font("Segoe UI", Font.ITALIC, 14));
+        gbc.gridx = 0;
+        gbc.gridy = 3;
+        gbc.gridwidth = 2;
+        gbc.anchor = GridBagConstraints.CENTER;
+        negotiationPanel.add(reactionLabel, gbc);
+
+
+        Runnable updateReaction = () -> {
+            int offeredSalary = (int) (((Double) salarySpinner.getValue()) * 1_000_000);
+            int offeredYears = (Integer) yearsSpinner.getValue();
+
+            double salaryDiffRatio = (double) offeredSalary / player.salary;
+            double yearsDiffRatio = (double) offeredYears / player.years;
+
+            double baseAcceptanceScore = 0.5;
+
+            if (salaryDiffRatio >= 1.2) baseAcceptanceScore += 0.3;
+            else if (salaryDiffRatio >= 1.0) baseAcceptanceScore += 0.1;
+            else if (salaryDiffRatio < 0.8) baseAcceptanceScore -= 0.2;
+
+            if (yearsDiffRatio >= 1.2) baseAcceptanceScore += 0.2;
+            else if (yearsDiffRatio >= 1.0) baseAcceptanceScore += 0.05;
+            else if (yearsDiffRatio < 0.8) baseAcceptanceScore -= 0.15;
+
+            baseAcceptanceScore -= (player.getOverall() - 75) * 0.005;
+
+            if (player.isSuperstar()) {
+                baseAcceptanceScore -= 0.2;
+            }
+
+            String reactionText;
+            Color reactionColor;
+            if (baseAcceptanceScore >= 0.8) {
+                reactionText = "Player's Reaction: Very Interested!";
+                reactionColor = Color.GREEN;
+            } else if (baseAcceptanceScore >= 0.6) {
+                reactionText = "Player's Reaction: Interested";
+                reactionColor = Color.YELLOW;
+            } else if (baseAcceptanceScore >= 0.4) {
+                reactionText = "Player's Reaction: Neutral";
+                reactionColor = Color.CYAN;
+            } else if (baseAcceptanceScore >= 0.2) {
+                reactionText = "Player's Reaction: Disinterested";
+                reactionColor = Color.ORANGE;
+            } else {
+                reactionText = "Player's Reaction: Highly Unlikely to Accept";
+                reactionColor = Color.RED;
+            }
+            reactionLabel.setText(reactionText);
+            reactionLabel.setForeground(reactionColor);
+        };
+
+        salarySpinner.addChangeListener(e -> updateReaction.run());
+        yearsSpinner.addChangeListener(e -> updateReaction.run());
+        updateReaction.run();
+
+
+        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        buttonPanel.setBackground(new Color(30, 30, 30));
+        buttonPanel.setOpaque(true);
+        buttonPanel.setBorder(new EmptyBorder(10, 0, 10, 0));
+
+        JButton signBtn = createStyledButton("Propose Contract", new Color(34, 139, 34));
+        JButton cancelBtn = createStyledButton("Cancel", new Color(220, 20, 60));
+        cancelBtn.addActionListener(e -> negotiateDialog.dispose());
+
+        signBtn.addActionListener(e -> {
+            int offeredSalary = (int) (((Double) salarySpinner.getValue()) * 1_000_000);
+            int offeredYears = (Integer) yearsSpinner.getValue();
+
+            if (team.size() >= maxTeamSize) {
+                JOptionPane.showMessageDialog(negotiateDialog, "Your team is full!", "Limit Reached", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+
+            if (budget < offeredSalary && !isGodModeEnabled) {
+                JOptionPane.showMessageDialog(negotiateDialog, "Not enough budget!", "Budget Error", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+
+            double salaryFactor = (double) offeredSalary / player.salary;
+            double yearsFactor = (double) offeredYears / player.years;
+
+            double successChance = 0.3;
+            successChance += (salaryFactor - 1.0) * 0.4;
+            successChance += (yearsFactor - 1.0) * 0.2;
+
+            successChance -= (player.getOverall() - 70) * 0.007;
+            if (player.isSuperstar()) {
+                successChance -= 0.15;
+            }
+            successChance = Math.max(0.05, Math.min(0.95, successChance));
+
+            boolean accepted = random.nextDouble() < successChance || isGodModeEnabled;
+
+            if (accepted) {
+                player.salary = offeredSalary;
+                player.years = offeredYears;
+                team.add(player);
+                market.removeIf(p -> p.code.equals(player.code));
+                budget -= offeredSalary;
+
+                addTransactionLog("SIGNED", player.name, offeredSalary,
+                        "Signed " + player.name + " for $" + formatMoney(offeredSalary) + " over " + offeredYears + " years");
+                refreshTable();
+                updateLabels();
+                if (newsFeedTimer != null) newsFeedTimer.restart();
+
+                for (int i = 0; i < marketTableModel.getRowCount(); i++) {
+                    if (marketTableModel.getValueAt(i, 0).equals(player.name)) {
+                        marketTableModel.removeRow(i);
+                        break;
+                    }
+                }
+
+                JOptionPane.showMessageDialog(negotiateDialog, "Successfully signed " + player.name + "!", "Signed", JOptionPane.INFORMATION_MESSAGE);
+                negotiateDialog.dispose();
+                parentDialog.dispose();
+            } else {
+                double counterChance = 0.4 + (player.getOverall() - 70) * 0.005;
+                if (player.isSuperstar()) counterChance += 0.1;
+                counterChance = Math.min(0.8, Math.max(0.2, counterChance));
+
+                if (random.nextDouble() < counterChance) {
+                    int counterSalary = (int) (offeredSalary * (1.0 + random.nextDouble() * 0.10) + 1_000_000);
+                    int counterYears = offeredYears + random.nextInt(2);
+
+                    int choice = JOptionPane.showConfirmDialog(negotiateDialog,
+                            player.name + " countered your offer!\nThey want $" + formatMoney(counterSalary) + " for " + counterYears + " years.\n" +
+                                    "Do you accept their counter-offer?",
+                            "Counter Offer!", JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
+
+                    if (choice == JOptionPane.YES_OPTION) {
+                        if (budget < counterSalary && !isGodModeEnabled) {
+                            JOptionPane.showMessageDialog(negotiateDialog, "Not enough budget to accept counter-offer!", "Budget Error", JOptionPane.WARNING_MESSAGE);
+                            return;
+                        }
+
+                        player.salary = counterSalary;
+                        player.years = counterYears;
+                        team.add(player);
+                        market.removeIf(p -> p.code.equals(p.code));
+                        budget -= counterSalary;
+
+                        addTransactionLog("SIGNED", player.name, counterSalary,
+                                "Accepted counter-offer for " + player.name + " at $" + formatMoney(counterSalary) + " over " + counterYears + " years");
+                        refreshTable();
+                        updateLabels();
+                        if (newsFeedTimer != null) newsFeedTimer.restart();
+                        for (int i = 0; i < marketTableModel.getRowCount(); i++) {
+                            if (marketTableModel.getValueAt(i, 0).equals(player.name)) {
+                                marketTableModel.removeRow(i);
+                                break;
+                            }
+                        }
+                        JOptionPane.showMessageDialog(negotiateDialog, "You accepted the counter-offer and signed " + player.name + "!", "Signed", JOptionPane.INFORMATION_MESSAGE);
+                        negotiateDialog.dispose();
+                        parentDialog.dispose();
+                    } else {
+                        JOptionPane.showMessageDialog(negotiateDialog, player.name + " rejected your counter-offer.", "Negotiation Failed", JOptionPane.INFORMATION_MESSAGE);
+                        negotiateDialog.dispose();
+                    }
+                } else {
+                    JOptionPane.showMessageDialog(negotiateDialog, player.name + " rejected your offer and walked away.", "Negotiation Failed", JOptionPane.INFORMATION_MESSAGE);
+                    negotiateDialog.dispose();
+                }
+            }
+        });
+
+        buttonPanel.add(signBtn);
+        buttonPanel.add(cancelBtn);
+
+        negotiateDialog.add(negotiationPanel, BorderLayout.CENTER);
+        negotiateDialog.add(buttonPanel, BorderLayout.SOUTH);
+        negotiateDialog.setVisible(true);
+    }
+
+
+    private void showContractExtensionDialog() {
+        if (team.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "You have no players to extend contracts with!", "Contract Extension", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+
+        JDialog extensionDialog = new JDialog(this, "Extend Player Contract", true);
+        configureDialog(extensionDialog, "Extend Player Contract", new Color(139, 0, 0));
+        extensionDialog.setSize(700, 500);
+        extensionDialog.setLocationRelativeTo(this);
+
+        JPanel contentPanel = new JPanel(new BorderLayout());
+        contentPanel.setBackground(new Color(30, 30, 30));
+        contentPanel.setOpaque(true);
+        extensionDialog.add(contentPanel, BorderLayout.CENTER);
+
+
+        String[] columns = {"Name", "Pos", "Salary", "Years Left", "OVR"};
+        DefaultTableModel model = new DefaultTableModel(columns, 0) {
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                return false;
+            }
+        };
+        for (Player p : team) {
+            model.addRow(new Object[]{p.name, p.position, "$" + formatMoney(p.salary), p.years, p.getOverall()});
+        }
+        JTable playerListTable = new JTable(model);
+        playerListTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        playerListTable.setFont(new Font("Arial", Font.PLAIN, 16));
+        playerListTable.setRowHeight(30);
+        playerListTable.getTableHeader().setFont(new Font("Arial", Font.BOLD, 16));
+        playerListTable.getTableHeader().setBackground(Color.BLACK);
+        playerListTable.getTableHeader().setForeground(Color.WHITE);
+        playerListTable.setBackground(Color.BLACK);
+        playerListTable.setForeground(Color.WHITE);
+        playerListTable.setSelectionBackground(Color.DARK_GRAY);
+        playerListTable.setSelectionForeground(Color.WHITE);
+        playerListTable.setDefaultRenderer(Object.class, new DarkThemeTableCellRenderer(team));
+
+        JScrollPane scrollPane = new JScrollPane(playerListTable);
+        styleJScrollPane(scrollPane, new Color(80, 0, 0), new Color(30, 30, 30)); // Apply custom scrollbar style with maroon
+        scrollPane.setBorder(BorderFactory.createLineBorder(Color.GRAY, 2));
+        contentPanel.add(scrollPane, BorderLayout.CENTER);
+
+        JPanel negotiationPanel = new JPanel(new GridBagLayout());
+        negotiationPanel.setBackground(new Color(30, 30, 30));
+        negotiationPanel.setOpaque(true);
+        negotiationPanel.setBorder(new EmptyBorder(10, 20, 10, 20));
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(5, 5, 5, 5);
+        gbc.anchor = GridBagConstraints.WEST;
+
+        JLabel selectedPlayerLabel = new JLabel("Selected: None");
+        selectedPlayerLabel.setForeground(Color.WHITE);
+        selectedPlayerLabel.setFont(new Font("Arial", Font.BOLD, 14));
+        gbc.gridx = 0; gbc.gridy = 0; gbc.gridwidth = 2;
+        negotiationPanel.add(selectedPlayerLabel, gbc);
+
+        JLabel newSalaryLabel = new JLabel("New Salary ($M):");
+        newSalaryLabel.setForeground(Color.WHITE);
+        JSpinner newSalarySpinner = new JSpinner(new SpinnerNumberModel(5.0, 1.0, 60.0, 0.5));
+        setSpinnerTextFieldColors(newSalarySpinner);
+        Component salaryEditorComp = newSalarySpinner.getEditor();
+        if (salaryEditorComp instanceof JSpinner.DefaultEditor) {
+            ((JSpinner.DefaultEditor) salaryEditorComp).getTextField().setColumns(8);
+        }
+        newSalarySpinner.setFont(new Font("Arial", Font.PLAIN, 14));
+
+
+        JLabel newYearsLabel = new JLabel("New Years:");
+        newYearsLabel.setForeground(Color.WHITE);
+        JSpinner newYearsSpinner = new JSpinner(new SpinnerNumberModel(3, 1, 7, 1));
+        setSpinnerTextFieldColors(newYearsSpinner);
+        Component yearsEditorComp = newYearsSpinner.getEditor();
+        if (yearsEditorComp instanceof JSpinner.DefaultEditor) {
+            ((JSpinner.DefaultEditor) yearsEditorComp).getTextField().setColumns(3);
+        }
+        newYearsSpinner.setFont(new Font("Arial", Font.PLAIN, 14));
+
+        gbc.gridy = 1; gbc.gridwidth = 1;
+        negotiationPanel.add(newSalaryLabel, gbc);
+        gbc.gridx = 1;
+        negotiationPanel.add(newSalarySpinner, gbc);
+
+        gbc.gridx = 0; gbc.gridy = 2;
+        negotiationPanel.add(newYearsLabel, gbc);
+        gbc.gridx = 1;
+        negotiationPanel.add(newYearsSpinner, gbc);
+
+        JButton proposeBtn = createStyledButton("Propose Extension", new Color(34, 139, 34));
+        proposeBtn.setPreferredSize(new Dimension(160, 35));
+        proposeBtn.setEnabled(false);
+
+        gbc.gridx = 0; gbc.gridy = 3; gbc.gridwidth = 2; gbc.anchor = GridBagConstraints.CENTER;
+        negotiationPanel.add(proposeBtn, gbc);
+
+        extensionDialog.add(negotiationPanel, BorderLayout.SOUTH);
+
+        final Player[] selectedPlayerRef = {null};
+
+        playerListTable.getSelectionModel().addListSelectionListener(e -> {
+            if (!e.getValueIsAdjusting()) {
+                int selectedRow = playerListTable.getSelectedRow();
+                if (selectedRow != -1) {
+                    String playerName = (String) playerListTable.getValueAt(selectedRow, 0);
+                    selectedPlayerRef[0] = team.stream().filter(p -> p.name.equals(playerName)).findFirst().orElse(null);
+                    if (selectedPlayerRef[0] != null) {
+                        selectedPlayerLabel.setText("Selected: " + selectedPlayerRef[0].name);
+                        newSalarySpinner.setValue(selectedPlayerRef[0].salary / 1_000_000.0);
+                        newYearsSpinner.setValue(selectedPlayerRef[0].years);
+                        proposeBtn.setEnabled(true);
+                    }
+                } else {
+                    selectedPlayerLabel.setText("Selected: None");
+                    proposeBtn.setEnabled(false);
+                    selectedPlayerRef[0] = null;
+                }
+            }
+        });
+
+        BorderLayout layout = (BorderLayout) extensionDialog.getContentPane().getLayout();
+        JPanel southPanel = (JPanel) layout.getLayoutComponent(BorderLayout.SOUTH);
+
+        if (southPanel != null) {
+            southPanel.removeAll();
+            southPanel.setLayout(new FlowLayout(FlowLayout.RIGHT));
+            southPanel.setBackground(new Color(30, 30, 30));
+            southPanel.setBorder(new EmptyBorder(10, 0, 10, 10));
+
+            proposeBtn.addActionListener(e -> {
+                if (selectedPlayerRef[0] == null) {
+                    JOptionPane.showMessageDialog(extensionDialog, "Please select a player first.", "Error", JOptionPane.WARNING_MESSAGE);
+                    return;
+                }
+
+                Player playerToExtend = selectedPlayerRef[0];
+                int proposedNewSalary = (int) (((Double) newSalarySpinner.getValue()) * 1_000_000);
+                int proposedNewYears = (Integer) newYearsSpinner.getValue();
+
+                double playerExpectationMultiplier = 1.0 + (playerToExtend.getOverall() - 75) * 0.005;
+                playerExpectationMultiplier = Math.max(0.9, Math.min(1.15, playerExpectationMultiplier));
+
+                if (playerToExtend.isSuperstar()) {
+                    playerExpectationMultiplier *= 1.1;
+                }
+
+                double desiredNewSalary = playerToExtend.salary * playerExpectationMultiplier;
+                double desiredNewYears = playerToExtend.years * playerExpectationMultiplier;
+
+                boolean acceptedSalaryOffer = proposedNewSalary >= desiredNewSalary * 0.9;
+                boolean acceptedYearsOffer = proposedNewYears >= desiredNewYears * 0.8;
+
+                String extensionResult;
+                double baseSuccessChance = 0.8;
+                if (playerToExtend.isSuperstar()) baseSuccessChance = 0.5;
+
+                if (acceptedSalaryOffer && acceptedYearsOffer && random.nextDouble() < baseSuccessChance) {
+                    extensionResult = "SUCCESS";
+                } else if ((acceptedSalaryOffer || acceptedYearsOffer) && random.nextDouble() < (baseSuccessChance + 0.1) / 2) {
+                    extensionResult = "COUNTER";
+                } else {
+                    extensionResult = "REJECT";
+                }
+
+                if (extensionResult.equals("SUCCESS")) {
+                    playerToExtend.salary = proposedNewSalary;
+                    playerToExtend.years = proposedNewYears;
+                    addTransactionLog("CONTRACT_EXTENSION", playerToExtend.name, proposedNewSalary,
+                            "Extended contract for " + playerToExtend.name + " for " + proposedNewYears + " years at $" + formatMoney(proposedNewSalary));
+                    JOptionPane.showMessageDialog(extensionDialog,
+                            "Successfully extended " + playerToExtend.name + "'s contract to " + proposedNewYears + " years at $" + formatMoney(proposedNewSalary) + "!",
+                            "Extension Successful", JOptionPane.INFORMATION_MESSAGE);
+                    refreshTable();
+                    updateLabels();
+                    if (newsFeedTimer != null) newsFeedTimer.restart();
+                    extensionDialog.dispose();
+                } else if (extensionResult.equals("COUNTER")) {
+                    int counterSalary = (int) (proposedNewSalary * (1 + random.nextDouble() * 0.05));
+                    int counterYears = proposedNewYears + random.nextInt(2);
+
+                    int choice = JOptionPane.showConfirmDialog(extensionDialog,
+                            playerToExtend.name + " countered your extension offer!\nThey want $" + formatMoney(counterSalary) + " for " + counterYears + " years.\n" +
+                                    "Do you accept their counter-offer?",
+                            "Counter Offer!", JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
+
+                    if (choice == JOptionPane.YES_OPTION) {
+                        if (budget < counterSalary && !isGodModeEnabled) {
+                            JOptionPane.showMessageDialog(extensionDialog, "Not enough budget to accept counter-offer!", "Budget Error", JOptionPane.WARNING_MESSAGE);
+                            return;
+                        }
+
+                        playerToExtend.salary = counterSalary;
+                        playerToExtend.years = counterYears;
+                        addTransactionLog("CONTRACT_EXTENSION", playerToExtend.name, counterSalary,
+                                "Accepted counter-offer for " + playerToExtend.name + " at $" + formatMoney(counterSalary) + " over " + counterYears + " years");
+                        JOptionPane.showMessageDialog(extensionDialog, "You accepted the counter-offer and extended " + playerToExtend.name + "!", "Extension Successful", JOptionPane.INFORMATION_MESSAGE);
+                        refreshTable();
+                        updateLabels();
+                        if (newsFeedTimer != null) newsFeedTimer.restart();
+                        extensionDialog.dispose();
+                    } else {
+                        JOptionPane.showMessageDialog(extensionDialog, "Extension negotiation failed. " + playerToExtend.name + " rejected your counter-offer.");
+                    }
+                } else {
+                    JOptionPane.showMessageDialog(extensionDialog, "Extension negotiation failed. " + playerToExtend.name + " rejected your offer.");
+                }
+            });
+
+            JButton closeBtn = createStyledButton("Close", new Color(105, 105, 105));
+            closeBtn.addActionListener(e -> extensionDialog.dispose());
+
+            southPanel.add(proposeBtn);
+            southPanel.add(closeBtn);
+        }
+        extensionDialog.setVisible(true);
+    }
+
+    private void showFreeAgentOffers() {
+        JDialog offersDialog = new JDialog(this, "Free Agent Offers", true);
+        configureDialog(offersDialog, "Incoming Free Agent Offers", new Color(139, 0, 0));
+        offersDialog.setSize(800, 600);
+        offersDialog.setLocationRelativeTo(this);
+
+        JPanel contentPanel = new JPanel(new BorderLayout());
+        contentPanel.setBackground(new Color(30, 30, 30));
+        contentPanel.setOpaque(true);
+        offersDialog.add(contentPanel, BorderLayout.CENTER);
+
+
+        String[] offerColumns = {"Player", "Pos", "Offer Salary ($M)", "Offer Years", "OVR"};
+        DefaultTableModel offerModel = new DefaultTableModel(offerColumns, 0) {
+            @Override
+            public boolean isCellEditable(int row, int column) { return false; }
+            @Override
+            public Class<?> getColumnClass(int columnIndex) {
+                if (columnIndex == 2) return Double.class;
+                if (columnIndex == 3) return Integer.class;
+                if (columnIndex == 4) return Integer.class;
+                return super.getColumnClass(columnIndex);
+            }
+        };
+        JTable offerTable = new JTable(offerModel);
+        offerTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        offerTable.setFont(new Font("Arial", Font.PLAIN, 16));
+        offerTable.setRowHeight(30);
+        offerTable.getTableHeader().setFont(new Font("Arial", Font.BOLD, 16));
+        offerTable.getTableHeader().setBackground(Color.BLACK);
+        offerTable.getTableHeader().setForeground(Color.WHITE);
+        offerTable.setBackground(Color.BLACK);
+        offerTable.setForeground(Color.WHITE);
+        offerTable.setSelectionBackground(Color.DARK_GRAY);
+        offerTable.setSelectionForeground(Color.WHITE);
+        offerTable.setDefaultRenderer(Object.class, new DarkThemeTableCellRenderer(market));
+
+        offerTable.getColumnModel().getColumn(2).setCellRenderer(new DefaultTableCellRenderer() {
+            @Override
+            protected void paintComponent(Graphics g) {
+                Graphics2D g2 = (Graphics2D) g.create();
+                g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+                super.paintComponent(g2);
+                g2.dispose();
+            }
+            @Override
+            public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected, boolean hasFocus, int row, int column) {
+                super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
+                if (value instanceof Double) {
+                    setText(String.format("%,.1fM", (Double) value));
+                }
+                setHorizontalAlignment(SwingConstants.RIGHT);
+                return this;
+            }
+        });
+
+
+        JScrollPane scrollPane = new JScrollPane(offerTable);
+        styleJScrollPane(scrollPane, new Color(80, 0, 0), new Color(30, 30, 30)); // Apply custom scrollbar style with maroon
+        scrollPane.setBorder(BorderFactory.createLineBorder(Color.GRAY, 2));
+        contentPanel.add(scrollPane, BorderLayout.CENTER);
+
+        BorderLayout layout = (BorderLayout) offersDialog.getContentPane().getLayout();
+        JPanel southPanel = (JPanel) layout.getLayoutComponent(BorderLayout.SOUTH);
+
+        if (southPanel != null) {
+            southPanel.removeAll();
+            southPanel.setLayout(new FlowLayout(FlowLayout.RIGHT));
+            southPanel.setBackground(new Color(30, 30, 30));
+            southPanel.setBorder(new EmptyBorder(10, 0, 10, 10));
+
+            JButton acceptOfferBtn = createStyledButton("Accept Offer", new Color(34, 139, 34));
+            acceptOfferBtn.addActionListener(e -> {
+                int selectedRow = offerTable.getSelectedRow();
+                if (selectedRow == -1) {
+                    JOptionPane.showMessageDialog(offersDialog, "Please select an offer to accept.", "No Offer Selected", JOptionPane.WARNING_MESSAGE);
+                    return;
+                }
+                String playerName = (String) offerModel.getValueAt(selectedRow, 0);
+                Player offeredPlayer = market.stream().filter(p -> p.name.equals(playerName)).findFirst().orElse(null);
+
+                if (offeredPlayer == null) {
+                    JOptionPane.showMessageDialog(offersDialog, "Error: Player not found in market. (Already signed or removed?)", "Error", JOptionPane.ERROR_MESSAGE);
+                    offerModel.removeRow(selectedRow);
+                    return;
+                }
+
+                int offeredSalary = (int) ((Double) offerModel.getValueAt(selectedRow, 2) * 1_000_000);
+                int offeredYears = (Integer) offerModel.getValueAt(selectedRow, 3);
+
+                if (team.size() >= maxTeamSize) {
+                    JOptionPane.showMessageDialog(offersDialog, "Your team is full! Cannot sign more than " + maxTeamSize + " players.", "Team Full", JOptionPane.WARNING_MESSAGE);
+                    return;
+                }
+
+                if (budget < offeredSalary && !isGodModeEnabled) {
+                    JOptionPane.showMessageDialog(offersDialog, "Not enough budget to sign " + offeredPlayer.name + "!", "Budget Exceeded", JOptionPane.WARNING_MESSAGE);
+                    return;
+                }
+
+                offeredPlayer.salary = offeredSalary;
+                offeredPlayer.years = offeredYears;
+                team.add(offeredPlayer);
+                market.removeIf(p -> p.code.equals(offeredPlayer.code));
+                budget -= offeredSalary;
+
+                addTransactionLog("FREE_AGENT_SIGNING", offeredPlayer.name, offeredSalary,
+                        "Signed " + offeredPlayer.name + " as a free agent for $" + formatMoney(offeredSalary) + " over " + offeredYears + " years");
+
+                JOptionPane.showMessageDialog(offersDialog, "Successfully signed " + offeredPlayer.name + "!", "Signed", JOptionPane.INFORMATION_MESSAGE);
+                refreshTable();
+                updateLabels();
+                if (newsFeedTimer != null) newsFeedTimer.restart();
+                generateNewOffers(offerModel);
+            });
+
+            JButton declineOfferBtn = createStyledButton("Decline Offer", new Color(220, 20, 60));
+            declineOfferBtn.addActionListener(e -> {
+                int selectedRow = offerTable.getSelectedRow();
+                if (selectedRow == -1) {
+                    JOptionPane.showMessageDialog(offersDialog, "Please select an offer to decline.", "No Offer Selected", JOptionPane.WARNING_MESSAGE);
+                    return;
+                }
+                offerModel.removeRow(selectedRow);
+                JOptionPane.showMessageDialog(offersDialog, "Offer declined.", "Declined", JOptionPane.INFORMATION_MESSAGE);
+            });
+
+            refreshOffersBtn = createStyledButton("Refresh Offers", new Color(255, 140, 0));
+            refreshOffersBtn.addActionListener(e -> {
+                if (!isGodModeEnabled && freeAgentCooldownTimer.isRunning()) {
+                    return; // Button is on cooldown
+                }
+                generateNewOffers(offerModel);
+                if (!isGodModeEnabled) {
+                    refreshOffersBtn.setEnabled(false);
+                    freeAgentCooldownTimer.start();
+                    new Timer(1000, new ActionListener() {
+                        int timeLeft = 300; // 5 minutes * 60 seconds = 300 seconds
+                        @Override
+                        public void actionPerformed(ActionEvent e) {
+                            refreshOffersBtn.setText("Refresh Offers (" + timeLeft + "s)");
+                            timeLeft--;
+                            if (timeLeft < 0) {
+                                ((Timer)e.getSource()).stop();
+                            }
+                        }
+                    }).start();
+                }
+            });
+
+            freeAgentCooldownTimer = new Timer(5 * 60 * 1000, new ActionListener() { // 5 minutes cooldown
+                @Override
+                public void actionPerformed(ActionEvent e) {
+                    refreshOffersBtn.setEnabled(true);
+                    refreshOffersBtn.setText("Refresh Offers");
+                    freeAgentCooldownTimer.stop();
+                }
+            });
+            freeAgentCooldownTimer.setRepeats(false);
+
+            southPanel.add(acceptOfferBtn);
+            southPanel.add(declineOfferBtn);
+            southPanel.add(refreshOffersBtn);
+            JButton closeBtn = createStyledButton("Close", new Color(105, 105, 105));
+            closeBtn.addActionListener(e -> offersDialog.dispose());
+            southPanel.add(closeBtn);
+        }
+
+        generateNewOffers(offerModel);
+        offersDialog.setVisible(true);
+    }
+
+    private void generateNewOffers(DefaultTableModel offerModel) {
+        offerModel.setRowCount(0);
+
+        for (int i = 0; i < 15; i++) { // Generate 15 offers
+            Player p = getRandomPlayerByOverallChance(false, false); // For free agents, use FA chances
+            if (p != null) {
+                // Ensure the player is not already on the team
+                if (team.stream().anyMatch(tp -> tp.code.equals(p.code))) {
+                    // This player is already on the team, skip this iteration and try again
+                    i--; // Decrement i to ensure we still try to get 15 unique players
+                    continue;
+                }
+                double salaryFactor = 0.8 + (random.nextDouble() * 0.4);
+                if (p.isSuperstar()) {
+                    salaryFactor = 1.0 + (random.nextDouble() * 0.2);
+                }
+                int offeredSalary = (int) (p.salary * salaryFactor);
+                offeredSalary = Math.max(1_000_000, offeredSalary);
+
+                int offeredYears = Math.max(1, p.years - random.nextInt(2));
+
+                offerModel.addRow(new Object[]{
+                        p.name, p.position, offeredSalary / 1_000_000.0, offeredYears, p.getOverall()
+                });
+            }
+        }
+    }
+
+
+    private void showDraftPicksDialog() {
+        JDialog draftPicksDialog = new JDialog(this, "Your Draft Picks", true);
+        configureDialog(draftPicksDialog, "Your Current Draft Picks", new Color(139, 0, 0));
+        draftPicksDialog.setSize(500, 400);
+        draftPicksDialog.setLocationRelativeTo(this);
+
+        String[] columns = {"Year", "Round"};
+        DefaultTableModel model = new DefaultTableModel(columns, 0) {
+            @Override
+            public boolean isCellEditable(int row, int column) { return false; }
+        };
+
+        draftPicks.sort(Comparator.comparingInt(DraftPick::getYear).thenComparingInt(DraftPick::getRound));
+
+        for (DraftPick pick : draftPicks) {
+            model.addRow(new Object[]{pick.getYear(), pick.getRound() + (pick.getRound() == 1 ? "st" : "nd") + " Round Pick"});
+        }
+
+        JTable draftPickTable = new JTable(model);
+        draftPickTable.setFont(new Font("Arial", Font.PLAIN, 16));
+        draftPickTable.setRowHeight(30);
+        draftPickTable.getTableHeader().setFont(new Font("Arial", Font.BOLD, 16));
+        draftPickTable.getTableHeader().setBackground(Color.BLACK);
+        draftPickTable.getTableHeader().setForeground(Color.WHITE);
+        draftPickTable.setBackground(Color.BLACK);
+        draftPickTable.setForeground(Color.WHITE);
+        draftPickTable.setSelectionBackground(Color.DARK_GRAY);
+        draftPickTable.setSelectionForeground(Color.WHITE);
+        draftPickTable.setDefaultRenderer(Object.class, new DarkThemeTableCellRenderer(team));
+
+        JScrollPane scrollPane = new JScrollPane(draftPickTable);
+        styleJScrollPane(scrollPane, new Color(80, 0, 0), new Color(30, 30, 30)); // Apply custom scrollbar style with maroon
+        scrollPane.setBorder(BorderFactory.createLineBorder(Color.GRAY, 2));
+        draftPicksDialog.add(scrollPane, BorderLayout.CENTER);
+        draftPicksDialog.setVisible(true);
+    }
+
+    private int getDraftPickValueBase(DraftPick pick) {
+        if (pick.getRound() == 1) {
+            if (pick.getYear() == LocalDate.now().getYear() + season) {
+                return 50;
+            } else {
+                return 40;
+            }
+        } else {
+            return 35;
+        }
+    }
+
+
+    private void nextSeason() {
+        if (team.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "You need players to simulate a season!",
+                    "Season Error", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        if (team.size() < MIN_TEAM_SIZE_FOR_SEASON) {
+            JOptionPane.showMessageDialog(this, "You need at least " + MIN_TEAM_SIZE_FOR_SEASON + " players to play the next season! Current: " + team.size(),
+                    "Team Size Error", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        if (team.size() > maxTeamSize) {
+            JOptionPane.showMessageDialog(this, "Your team has " + team.size() + " players. The maximum team size is " + maxTeamSize + ". Please cut or trade players.",
+                    "Team Size Error", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+
+        long currentTotalSalary = (long) team.stream().mapToDouble(p -> p.salary).sum();
+        if (currentTotalSalary < MIN_SALARY_FLOOR) {
+            JOptionPane.showMessageDialog(this, "Your team's total salary ($" + formatMoney(currentTotalSalary) +
+                            ") is below the minimum salary floor ($" + formatMoney(MIN_SALARY_FLOOR) +
+                            "). You need to sign more players to meet the cap floor before advancing.",
+                    "Undercap Error", JOptionPane.WARNING_MESSAGE);
+            remainingTickets = SEASON_TICKET_STOCK;
+            return;
+        }
+
+        List<Player> topPlayers = team.stream()
+                .sorted(Comparator.comparingInt(Player::getOverall).reversed())
+                .limit(6)
+                .toList();
+
+        double teamOverall = topPlayers.stream().mapToDouble(Player::getOverall).average().orElse(0);
+        double teamPPG = topPlayers.stream().mapToDouble(p -> p.ppg).average().orElse(0);
+        double teamAPG = topPlayers.stream().mapToDouble(p -> p.apg).average().orElse(0);
+        double teamRPG = topPlayers.stream().mapToDouble(p -> p.rpg).average().orElse(0);
+
+        double overallEffect = (teamOverall - 40.0) / 50.0;
+        double baseWinProbability = 0.20 + (overallEffect * 0.75);
+        baseWinProbability = Math.min(0.95, Math.max(0.10, baseWinProbability));
+
+        double offenseFactor = (teamPPG - 15.0) * 0.002;
+        double playmakerFactor = (teamAPG - 5.0) * 0.005;
+        double reboundFactor = (teamRPG - 6.0) * 0.003;
+
+        double totalStatInfluence = (offenseFactor + playmakerFactor + reboundFactor);
+        double finalWinProbability = baseWinProbability + totalStatInfluence;
+        finalWinProbability = Math.min(0.95, Math.max(0.10, finalWinProbability));
+
+        wins = 0;
+        losses = 0;
+        for (int i = 0; i < 82; i++) {
+            if (random.nextDouble() < finalWinProbability) {
+                wins++;
+            } else {
+                losses++;
+            }
+        }
+
+        madePlayoffs = wins >= 41;
+        wonChampionship = false;
+
+        List<String> playoffResults = new ArrayList<>();
+        if (madePlayoffs) {
+            playoffResults.add("Made Playoffs!");
+            double playoffWinBaseChance = 0.5;
+            String[] rounds = {"Round 1", "Conference Semifinals", "Conference Finals", "NBA Finals"};
+
+            List<Player> allPlayers = new ArrayList<>(market);
+            allPlayers.addAll(team);
+            List<Player> highOvrPlayers = allPlayers.stream()
+                    .filter(p -> p.getOverall() >= 75)
+                    .collect(Collectors.toList());
+            Collections.shuffle(highOvrPlayers);
+
+            for (int i = 0; i < rounds.length; i++) {
+                if (!playoffResults.get(playoffResults.size() - 1).contains("Eliminated")) {
+                    Player opponentStar = highOvrPlayers.isEmpty()
+                            ? new Player("OPP", "Opponent Star", "C", 10_000_000, 1, "Healthy", 20.0, 5.0, 10.0)
+                            : highOvrPlayers.remove(0);
+                    if (opponentStar.getOverall() < 80)
+                        opponentStar.setOverallOverride(80 + random.nextInt(10));
+
+                    double seriesWinProbability = playoffWinBaseChance + ((teamOverall - opponentStar.getOverall()) / 100.0);
+                    seriesWinProbability = Math.max(0.1, Math.min(0.9, seriesWinProbability));
+
+                    if (random.nextDouble() < seriesWinProbability) {
+                        playoffResults.add("Won " + rounds[i] + " vs " + opponentStar.name + " (OVR " + opponentStar.getOverall() + ")!");
+                        if (i == rounds.length - 1) {
+                            wonChampionship = true;
+                        }
+                    } else {
+                        playoffResults.add("Eliminated in " + rounds[i] + " by " + opponentStar.name + " (OVR " + opponentStar.getOverall() + ").");
+                    }
+                }
+            }
+        } else {
+            playoffResults.add("Did not make playoffs.");
+        }
+
+        season++;
+
+        // Bonuses
+        if (wonChampionship) {
+            budget += 30_000_000;
+            addTransactionLog("BONUS", "Championship Bonus", 30_000_000, "Earned bonus for winning the championship");
+        } else if (madePlayoffs) {
+            budget += 20_000_000;
+            addTransactionLog("BONUS", "Playoffs Bonus", 20_000_000, "Earned bonus for making the playoffs");
+        } else {
+            budget += 10_000_000;
+            addTransactionLog("BONUS", "Participation Bonus", 10_000_000, "Earned participation bonus for missing playoffs");
+        }
+        // ======== RESET STADIUM STATS AND SIMULATE SALES ========
+        remainingTickets = SEASON_TICKET_STOCK;
+        ticketIncomeThisSeason = 0;
+        foodPurchaseThisSeason = 0;
+
+        // --- Ticket Sales (capped at 10M)
+        int demand = (int)(SEASON_TICKET_STOCK * Math.random() * 0.9 + 0.1);
+        int sellable = Math.min(demand, remainingTickets);
+        int potentialIncome = sellable * ticketPrice;
+        int cappedIncome = Math.min(TICKET_INCOME_LIMIT, potentialIncome);
+        remainingTickets -= sellable;
+        totalTicketsSold += sellable;
+        totalTicketIncome += cappedIncome;
+        ticketIncomeThisSeason += cappedIncome;
+        stadiumIncomeBalance += cappedIncome;
+
+        // --- Food Sales
+        for (String item : itemCostPrice.keySet()) {
+            int stock = itemStock.get(item);
+            if (stock > 0) {
+                int sold = (int) (stock * (0.5 + Math.random() * 0.5));
+                int income = sold * (itemSellPrice.get(item) - itemCostPrice.get(item));
+                itemStock.put(item, stock - sold);
+                itemSold.put(item, itemSold.get(item) + sold);
+                stadiumIncomeBalance += income;
+            }
+        }
+
+        List<Player> injuredPlayersThisSeason = new ArrayList<>();
+        List<Player> expiredContractsThisSeason = new ArrayList<>();
+
+        for (Player p : team) {
+            p.years--;
+            if (random.nextDouble() < 0.4) {
+                p.ppg += (random.nextDouble() - 0.5) * 1.5;
+                p.apg += (random.nextDouble() - 0.5) * 0.8;
+                p.rpg += (random.nextDouble() - 0.5) * 1.0;
+                p.ppg = Math.max(0, p.ppg);
+                p.apg = Math.max(0, p.apg);
+                p.rpg = Math.max(0, p.rpg);
+                p.overallOverride = null;
+            }
+
+            if (random.nextDouble() < 0.05 && !p.status.equals("Injured")) {
+                p.status = "Injured";
+                injuredPlayersThisSeason.add(p);
+                addTransactionLog("INJURY", p.name, 0, p.name + " got injured.");
+            } else if (p.status.equals("Injured") && random.nextDouble() < 0.6) {
+                p.status = "Healthy";
+                addTransactionLog("INJURY_RECOVERY", p.name, 0, p.name + " recovered from injury.");
+            }
+        }
+
+        int refundTotal = 0;
+        Iterator<Player> iterator = team.iterator();
+        while (iterator.hasNext()) {
+            Player p = iterator.next();
+            if (p.years <= 0) {
+                budget += p.salary;
+                refundTotal += p.salary;
+                addTransactionLog("SALARY_REFUND", p.name, p.salary,
+                        "Contract expired, refunded salary for " + p.name);
+                market.add(p);
+                expiredContractsThisSeason.add(p);
+                iterator.remove();
+            }
+        }
+
+        if (refundTotal > 0) {
+            JOptionPane.showMessageDialog(this,
+                    "You recovered $" + formatMoney(refundTotal) + " from expired contracts.",
+                    "Salary Refund", JOptionPane.INFORMATION_MESSAGE);
+        }
+
+        int nextDraftYear = LocalDate.now().getYear() + season;
+        draftPicks.add(new DraftPick(nextDraftYear, 1));
+        draftPicks.add(new DraftPick(nextDraftYear, 2));
+        addTransactionLog("DRAFT_PICK_RECEIVED", "N/A", 0, "Received " + nextDraftYear + " 1st and 2nd round picks");
+
+        addTransactionLog("SEASON_COMPLETE", "Season " + (season - 1), 0,
+                "Finished " + wins + "-" + losses +
+                        (madePlayoffs ? " (Playoffs)" : "") +
+                        (wonChampionship ? " (Champions)" : ""));
+
+        Player teamMVP = team.stream()
+                .max(Comparator.comparingDouble(p -> p.ppg * 0.4 + p.apg * 0.3 + p.rpg * 0.3 + p.getOverall() * 0.1))
+                .orElse(null);
+
+        List<Player> potentialAwardWinners = new ArrayList<>(market);
+        potentialAwardWinners.addAll(team);
+        potentialAwardWinners = potentialAwardWinners.stream()
+                .filter(p -> p.getOverall() >= 85)
+                .collect(Collectors.toList());
+        Collections.shuffle(potentialAwardWinners);
+
+        Player leagueMVP = potentialAwardWinners.isEmpty() ? null : potentialAwardWinners.remove(0);
+        Player dpoy = potentialAwardWinners.isEmpty() ? null : potentialAwardWinners.remove(0);
+        Player finalsMVP = wonChampionship && teamMVP != null ? teamMVP : (potentialAwardWinners.isEmpty() ? null : potentialAwardWinners.remove(0));
+
+        showSeasonResultsDialog(wins, losses, teamOverall, teamPPG, teamAPG, teamRPG,
+                madePlayoffs, wonChampionship, playoffResults, teamMVP, expiredContractsThisSeason,
+                injuredPlayersThisSeason, leagueMVP, dpoy, finalsMVP);
+
+        refreshTable();
+        updateLabels();
+        updateDraftPicksSummary();
+        checkAndGrantAchievements();
+        saveData();
+        if (newsFeedTimer != null) newsFeedTimer.restart();
+    }
+
+    private void showSeasonResultsDialog(int wins, int losses, double teamOverall, double teamPPG, double teamAPG, double teamRPG,
+                                         boolean madePlayoffs, boolean wonChampionship, List<String> playoffResults,
+                                         Player teamMVP, List<Player> expiredContracts, List<Player> injuredPlayers,
+                                         Player leagueMVP, Player dpoy, Player finalsMVP) {
+        JDialog resultsDialog = new JDialog(this, "Season " + (season - 1) + " Results", true);
+        configureDialog(resultsDialog, "Season " + (season - 1) + " Results", new Color(139, 0, 0));
+        resultsDialog.setSize(900, 750);
+        resultsDialog.setLocationRelativeTo(this);
+
+        JPanel contentPanel = new JPanel(new GridBagLayout());
+        contentPanel.setBackground(new Color(30, 30, 30));
+        contentPanel.setBorder(new EmptyBorder(15, 15, 15, 15));
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(5, 5, 5, 5);
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+
+        JLabel summaryTitle = new JLabel("Season Summary", SwingConstants.CENTER);
+        summaryTitle.setFont(new Font("Arial", Font.BOLD, 20));
+        summaryTitle.setForeground(new Color(255, 140, 0));
+        gbc.gridx = 0; gbc.gridy = 0; gbc.gridwidth = 2;
+        contentPanel.add(summaryTitle, gbc);
+
+        JPanel statsGridPanel = new JPanel(new GridLayout(3, 2, 10, 10));
+        statsGridPanel.setOpaque(false);
+        gbc.gridx = 0; gbc.gridy = 1; gbc.gridwidth = 2; gbc.weightx = 1.0;
+        contentPanel.add(statsGridPanel, gbc);
+
+        addStatCard(statsGridPanel, "Record:", String.format("%d-%d (%.1f%% win rate)", wins, losses, (wins / 82.0) * 100));
+        addStatCard(statsGridPanel, "Team Overall (Top 6):", String.format("%.1f", teamOverall));
+        addStatCard(statsGridPanel, "Team Avg PPG:", String.format("%.1f", teamPPG));
+        addStatCard(statsGridPanel, "Team Avg APG:", String.format("%.1f", teamAPG));
+        addStatCard(statsGridPanel, "Team Avg RPG:", String.format("%.1f", teamRPG));
+
+        int currentRow = gbc.gridy + 1;
+        gbc.gridwidth = 1;
+
+        JLabel playoffTitle = new JLabel("Playoff Results", SwingConstants.CENTER);
+        playoffTitle.setFont(new Font("Arial", Font.BOLD, 20));
+        playoffTitle.setForeground(new Color(255, 140, 0));
+        gbc.gridx = 0; gbc.gridy = currentRow++; gbc.gridwidth = 2;
+        contentPanel.add(playoffTitle, gbc);
+        gbc.gridwidth = 1;
+
+        for (String result : playoffResults) {
+            addInfoRow(contentPanel, gbc, currentRow++, result, "");
+        }
+        addInfoRow(contentPanel, gbc, currentRow++, wonChampionship ? "NBA CHAMPIONS" : (madePlayoffs ? "Made Playoffs" : "Missed Playoffs"), "");
+
+        JLabel teamRecordsTitle = new JLabel("Team Records", SwingConstants.CENTER);
+        teamRecordsTitle.setFont(new Font("Arial", Font.BOLD, 20));
+        teamRecordsTitle.setForeground(new Color(255, 140, 0));
+        gbc.gridx = 0; gbc.gridy = currentRow++; gbc.gridwidth = 2;
+        contentPanel.add(teamRecordsTitle, gbc);
+        gbc.gridwidth = 1;
+
+        addInfoRow(contentPanel, gbc, currentRow++, "Team MVP:", (teamMVP != null) ? teamMVP.name + " (OVR " + teamMVP.getOverall() + ")" : "None");
+
+        addInfoRow(contentPanel, gbc, currentRow++, "Expired Contracts:",
+                expiredContracts.isEmpty() ? "None" :
+                        expiredContracts.stream().map(p -> p.name).collect(Collectors.joining(", ")));
+
+        addInfoRow(contentPanel, gbc, currentRow++, "Injured Players:",
+                injuredPlayers.isEmpty() ? "None" :
+                        injuredPlayers.stream().map(p -> p.name).collect(Collectors.joining(", ")));
+
+        JLabel leagueAwardsTitle = new JLabel("League Awards", SwingConstants.CENTER);
+        leagueAwardsTitle.setFont(new Font("Arial", Font.BOLD, 20));
+        leagueAwardsTitle.setForeground(new Color(255, 140, 0));
+        gbc.gridx = 0; gbc.gridy = currentRow++; gbc.gridwidth = 2;
+        contentPanel.add(leagueAwardsTitle, gbc);
+        gbc.gridwidth = 1;
+
+        addInfoRow(contentPanel, gbc, currentRow++, "League MVP:",
+                (leagueMVP != null) ? leagueMVP.name + " (OVR " + leagueMVP.getOverall() + ")" : "None");
+
+        addInfoRow(contentPanel, gbc, currentRow++, "DPOY:",
+                (dpoy != null) ? dpoy.name + " (OVR " + dpoy.getOverall() + ")" : "None");
+
+        addInfoRow(contentPanel, gbc, currentRow++, "Finals MVP:",
+                (finalsMVP != null) ? finalsMVP.name + " (OVR " + finalsMVP.getOverall() + ")" : "None");
+
+        resultsDialog.add(new JScrollPane(contentPanel), BorderLayout.CENTER);
+        resultsDialog.setVisible(true);
+    }
+
+    private void addInfoRow(JPanel panel, GridBagConstraints gbc, int row, String labelText, String valueText) {
+        gbc.gridx = 0;
+        gbc.gridy = row;
+        JLabel label = new JLabel(labelText);
+        label.setFont(new Font("Arial", Font.BOLD, 14));
+        label.setForeground(Color.WHITE);
+        panel.add(label, gbc);
+
+        gbc.gridx = 1;
+        JLabel value = new JLabel(valueText);
+        value.setFont(new Font("Arial", Font.PLAIN, 14));
+        value.setForeground(Color.LIGHT_GRAY);
+        panel.add(value, gbc);
+    }
+
+
+    private void resetSeason() {
+        int confirm = JOptionPane.showConfirmDialog(this,
+                "Are you sure you want to reset all progress?\nThis will clear your team, budget, and stats.",
+                "Confirm Reset", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+
+        if (confirm == JOptionPane.YES_OPTION) {
+            resetGameData();
+            initializeRandomTeam();
+            refreshTable();
+            updateLabels();
+            updateGodModeState();
+            updateDraftPicksSummary();
+            addTransactionLog("GAME_RESET", "Full Reset", 0, "Reset all game data and started fresh");
+            JOptionPane.showMessageDialog(this, "Game has been reset successfully!");
+            saveData();
+            if (newsFeedTimer != null) newsFeedTimer.restart();
+        }
+    }
+
+    private void addTransactionLog(String type, String playerName, double amount, String details) {
+        String currentDate = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd"));
+        TransactionLog log = new TransactionLog(currentDate, type, playerName, amount, details);
+        transactionLogs.add(log);
+        saveTransactionLogs();
+        if (newsFeedTimer != null) newsFeedTimer.restart();
+    }
+
+    private void saveTransactionLogs() {
+        try (PrintWriter pw = new PrintWriter(new FileWriter(logFile))) {
+            for (TransactionLog log : transactionLogs) {
+                pw.println(log.date + "," + log.type + "," + log.playerName + "," +
+                        log.amount + "," + log.details.replace(",", "&#44;"));
+            }
+        } catch (IOException e) {
+            System.err.println("Error saving transaction logs for user " + currentUsername + ": " + e.getMessage());
+        }
+    }
+
+    private void loadTransactionLogs() {
+        File file = new File(logFile);
+        if (!file.exists()) return;
+
+        transactionLogs.clear();
+        try (BufferedReader br = new BufferedReader(new FileReader(file))) {
+            String line;
+            while ((line = br.readLine()) != null) {
+                String[] parts = line.split(",", 5);
+                if (parts.length >= 5) {
+                    String details = parts[4].replace("&#44;", ",");
+                    transactionLogs.add(new TransactionLog(parts[0], parts[1], parts[2],
+                            Double.parseDouble(parts[3]), details));
+                }
+            }
+        } catch (IOException | NumberFormatException e) {
+            System.err.println("Error loading transaction logs for user " + currentUsername + ": " + e.getMessage());
+        }
+    }
+
+    private void setupSorting() {
+        sorter.setComparator(3, new Comparator<String>() {
+            @Override
+            public int compare(String s1, String s2) {
+                String cleanS1 = s1.replace("$", "").replace(",", "").replace("M", "");
+                double d1 = Double.parseDouble(cleanS1);
+                String cleanS2 = s2.replace("$", "").replace(",", "").replace("M", "");
+                double d2 = Double.parseDouble(cleanS2);
+                return Double.compare(d1, d2);
+            }
+        });
+    }
+
+    private void refreshTable() {
+        tableModel.setRowCount(0);
+        for (Player player : team) {
+            tableModel.addRow(new Object[]{
+                    player.code, player.name, player.position,
+                    "$" + formatMoney(player.salary), player.years + " yrs", player.status,
+                    String.format("%.1f", player.ppg), String.format("%.1f", player.apg),
+                    String.format("%.1f", player.rpg), player.getOverall()
+            });
+        }
+        updateLabels();
+    }
+
+    private String formatMoney(double amount) {
+        if (amount >= 1_000_000) {
+            return String.format("%,.1fM", amount / 1_000_000.0);
+        }
+        return String.format("%,.0f", amount);
+    }
+
+    private void updateLabels() {
+        long currentTotalSalaryUsed = team.stream().mapToLong(p -> p.salary).sum();
+
+        totalSalaryLabel.setText("Total Salary: $" + formatMoney(currentTotalSalaryUsed));
+        avgSalaryLabel.setText("Avg Salary: $" + formatMoney(team.stream().mapToDouble(p -> p.salary).average().orElse(0)));
+        budgetLabel.setText("Budget: $" + formatMoney(budget));
+        seasonLabel.setText("Season: " + season);
+        recordLabel.setText("Record: " + wins + "-" + losses);
+        salaryCapLabel.setText("Salary Cap: $" + formatMoney(currentTotalSalaryUsed) + " / $" + formatMoney(NBA_SALARY_CAP) + " used");
+    }
+
+    private void saveData() {
+        try (PrintWriter pw = new PrintWriter(new FileWriter(saveFile))) {
+            pw.println("TEAM:" + selectedTeam);
+            pw.println("BUDGET:" + budget);
+            pw.println("SEASON:" + season);
+            pw.println("WINS:" + wins);
+            pw.println("LOSSES:" + losses);
+            pw.println("PLAYOFFS:" + madePlayoffs);
+            pw.println("CHAMPIONSHIP:" + wonChampionship);
+            pw.println("IS_GOD_MODE:" + isGodModeEnabled);
+            pw.println("MAX_TEAM_SIZE:" + maxTeamSize);
+
+            pw.println("---CURRENT_TEAM---");
+            for (Player p : team) {
+                pw.println(p.code + "," + p.name + "," + p.position + "," +
+                        p.salary + "," + p.years + "," + p.status + "," +
+                        p.ppg + "," + p.apg + "," + p.rpg + "," + (p.overallOverride != null ? p.overallOverride : ""));
+            }
+            pw.println("---CURRENT_MARKET---");
+            for (Player p : market) {
+                boolean isOnTeam = team.stream().anyMatch(tp -> tp.code.equals(p.code));
+                if (!isOnTeam) {
+                    pw.println(p.code + "," + p.name + "," + p.position + "," +
+                            p.salary + "," + p.years + "," + p.status + "," +
+                            p.ppg + "," + p.apg + "," + p.rpg + "," + (p.overallOverride != null ? p.overallOverride : ""));
+                }
+            }
+            pw.println("---DRAFT_PICKS---");
+            for (DraftPick pick : draftPicks) {
+                pw.println(pick.getYear() + "," + pick.getRound());
+            }
+            pw.println("---ACHIEVEMENTS---");
+            for (Achievement ach : achievements) {
+                pw.println(ach.name.replace(",", "&#44;") + "," + ach.isUnlocked);
+            }
+
+        } catch (IOException e) {
+            System.err.println("Error saving data for user " + currentUsername + ": " + e.getMessage());
+        }
+    }
+
+    private void loadData() {
+        File file = new File(saveFile);
+        if (!file.exists()) {
+            System.out.println("Save file for user " + currentUsername + " not found. Starting new game data.");
+            initializeAchievements();
+            return;
+        }
+
+        try (BufferedReader br = new BufferedReader(new FileReader(file))) {
+            String line;
+            String section = "";
+            team.clear();
+            market.clear();
+            draftPicks.clear();
+            achievements.clear();
+
+            while ((line = br.readLine()) != null) {
+                if (line.startsWith("---")) {
+                    section = line;
+                    continue;
+                }
+
+                if (section.equals("---CURRENT_TEAM---")) {
+                    String[] parts = line.split(",", 10);
+                    if (parts.length >= 9) {
+                        Player p = new Player(parts[0], parts[1], parts[2],
+                                Integer.parseInt(parts[3]), Integer.parseInt(parts[4]),
+                                parts[5], Double.parseDouble(parts[6]),
+                                Double.parseDouble(parts[7]), Double.parseDouble(parts[8]));
+                        if (parts.length == 10 && !parts[9].isEmpty()) {
+                            p.setOverallOverride(Integer.parseInt(parts[9]));
+                        }
+                        team.add(p);
+                    }
+                } else if (section.equals("---CURRENT_MARKET---")) {
+                    String[] parts = line.split(",", 10);
+                    if (parts.length >= 9) {
+                        Player p = new Player(parts[0], parts[1], parts[2],
+                                Integer.parseInt(parts[3]), Integer.parseInt(parts[4]),
+                                parts[5], Double.parseDouble(parts[6]),
+                                Double.parseDouble(parts[7]), Double.parseDouble(parts[8]));
+                        if (parts.length == 10 && !parts[9].isEmpty()) {
+                            p.setOverallOverride(Integer.parseInt(parts[9]));
+                        }
+                        market.add(p);
+                    }
+                } else if (section.equals("---DRAFT_PICKS---")) {
+                    String[] parts = line.split(",");
+                    if (parts.length >= 2) {
+                        draftPicks.add(new DraftPick(Integer.parseInt(parts[0]), Integer.parseInt(parts[1])));
+                    }
+                } else if (section.equals("---ACHIEVEMENTS---")) {
+                    String[] parts = line.split(",", 2);
+                    if (parts.length >= 2) {
+                        String achievementName = parts[0].replace("&#44;", ",");
+                        boolean unlocked = Boolean.parseBoolean(parts[1]);
+                        achievements.add(new Achievement(achievementName, "", unlocked));
+                    }
+                }
+                else {
+                    String[] parts = line.split(":", 2);
+                    if (parts.length == 2) {
+                        switch (parts[0]) {
+                            case "TEAM": selectedTeam = parts[1]; break;
+                            case "BUDGET": budget = Integer.parseInt(parts[1]); break;
+                            case "SEASON": season = Integer.parseInt(parts[1]); break;
+                            case "WINS": wins = Integer.parseInt(parts[1]); break;
+                            case "LOSSES": losses = Integer.parseInt(parts[1]); break;
+                            case "PLAYOFFS": madePlayoffs = Boolean.parseBoolean(parts[1]); break;
+                            case "CHAMPIONSHIP": wonChampionship = Boolean.parseBoolean(parts[1]); break;
+                            case "IS_GOD_MODE": isGodModeEnabled = Boolean.parseBoolean(parts[1]); break;
+                            case "MAX_TEAM_SIZE": maxTeamSize = Integer.parseInt(parts[1]); break;
+                        }
+                    }
+                }
+            }
+            List<Player> tempOriginalMarket = new ArrayList<>();
+            for(Player p : originalMarket) {
+                boolean isOnLoadedTeam = team.stream().anyMatch(tp -> tp.code.equals(p.code));
+                if (!isOnLoadedTeam) {
+                    tempOriginalMarket.add(new Player(p.code, p.name, p.position, p.salary, p.years, p.status, p.ppg, p.apg, p.rpg));
+                }
+            }
+            for(Player p : tempOriginalMarket) {
+                boolean isInLoadedMarket = market.stream().anyMatch(mp -> mp.code.equals(p.code));
+                if(!isInLoadedMarket) {
+                    market.add(p);
+                }
+            }
+
+            List<Achievement> loadedAchievementsTemp = new ArrayList<>(achievements);
+            initializeAchievements();
+            for (Achievement defaultAch : achievements) {
+                for (Achievement loadedAch : loadedAchievementsTemp) {
+                    if (defaultAch.name.equals(loadedAch.name) && loadedAch.isUnlocked) {
+                        defaultAch.isUnlocked = true;
+                        break;
+                    }
+                }
+            }
+            teamNameLabel.setText(selectedTeam);
+            setTitle("Unified Finance Manager - " + selectedTeam);
+            refreshTable();
+            updateLabels();
+            updateGodModeState();
+            updateDraftPicksSummary();
+        } catch (IOException | NumberFormatException e) {
+            System.err.println("Error loading data for user " + currentUsername + ": " + e.getMessage());
+            JOptionPane.showMessageDialog(this, "Corrupted save file for " + currentUsername + ". Starting new game.", "Load Error", JOptionPane.ERROR_MESSAGE);
+            resetGameData();
+            initializeRandomTeam();
+            refreshTable();
+            updateLabels();
+            updateGodModeState();
+            updateDraftPicksSummary();
+        }
+    }
+
+
+    private void initializeRandomTeam() {
+        if (market.isEmpty() && originalMarket.isEmpty()) {
+            createDefaultPlayers();
+        }
+        if (market.isEmpty()) {
+            System.err.println("Error: No players available to initialize random team. Market is empty.");
+            return;
+        }
+
+        List<Player> availablePlayers = new ArrayList<>(market);
+        Collections.shuffle(availablePlayers);
+
+        int playersAdded = 0;
+        final int TARGET_PLAYERS = 12;
+        List<Player> playersForTeam = new ArrayList<>();
+
+        availablePlayers.sort(Comparator.comparingInt(p -> p.salary));
+
+        for (Player p : availablePlayers) {
+            if (playersAdded >= TARGET_PLAYERS) {
+                break;
+            }
+            if (budget - p.salary >= 0 && team.size() + playersForTeam.size() < maxTeamSize) {
+                playersForTeam.add(p);
+                budget -= p.salary;
+                playersAdded++;
+            }
+        }
+
+        for(Player p : playersForTeam) {
+            team.add(p);
+            market.removeIf(mp -> mp.code.equals(p.code));
+        }
+
+        addTransactionLog("TEAM_INITIALIZED", "Random Team", 0, "Started with " + team.size() + " players");
+    }
+
+
+    private void loadPlayers() {
+        File file = new File(playerFile);
+        if (!file.exists()) {
+            System.out.println("Player file not found. Creating default players.");
+            createDefaultPlayers();
+            return;
+        }
+
+        try (BufferedReader br = new BufferedReader(new FileReader(file))) {
+            String line;
+            while ((line = br.readLine()) != null) {
+                String[] parts = line.split(",");
+                if (parts.length >= 9) {
+                    Player p = new Player(parts[0], parts[1], parts[2],
+                            Integer.parseInt(parts[3]), Integer.parseInt(parts[4]),
+                            parts[5], Double.parseDouble(parts[6]),
+                            Double.parseDouble(parts[7]), Double.parseDouble(parts[8]));
+                    market.add(p);
+                    originalMarket.add(new Player(p.code, p.name, p.position, p.salary,
+                            p.years, p.status, p.ppg, p.apg, p.rpg));
+                }
+            }
+        } catch (IOException | NumberFormatException e) {
+            System.err.println("Error loading players from file: " + e.getMessage());
+            JOptionPane.showMessageDialog(this, "Error loading player data from file. Creating default players.", "File Error", JOptionPane.ERROR_MESSAGE);
+            createDefaultPlayers();
+        }
+    }
+
+
+    private void createDefaultPlayers() {
+        market.clear();
+        originalMarket.clear();
+
+        String[][] defaultPlayers = {
+                {"LBJ", "LeBron James", "SF", "44000000", "2", "Healthy", "25.3", "7.4", "7.4"},
+                {"SC30", "Stephen Curry", "PG", "48000000", "3", "Healthy", "29.5", "6.1", "5.2"},
+                {"KD35", "Kevin Durant", "SF", "42000000", "2", "Healthy", "26.4", "5.0", "6.6"},
+                {"GA34", "Giannis Antetokounmpo", "PF", "45000000", "4", "Healthy", "31.1", "5.7", "11.8"},
+                {"JT0", "Jayson Tatum", "SF", "32000000", "3", "Healthy", "26.9", "4.9", "8.0"},
+                {"AD3", "Anthony Davis", "PF", "40000000", "3", "Healthy", "25.9", "3.5", "12.5"},
+                {"JO15", "Nikola Jokic", "C", "47000000", "5", "Healthy", "26.4", "10.0", "12.4"},
+                {"DL7", "Damian Lillard", "PG", "45000000", "4", "Healthy", "32.2", "7.3", "4.8"},
+                {"JH13", "James Harden", "SG", "35000000", "2", "Healthy", "21.0", "10.7", "6.4"},
+                {"KJ2", "Kawhi Leonard", "SF", "43000000", "3", "Healthy", "25.5", "3.9", "6.5"},
+                {"DM1", "Donovan Mitchell", "SG", "32000000", "4", "Healthy", "28.3", "4.4", "4.3"},
+                {"JL20", "Joel Embiid", "C", "46000000", "4", "Healthy", "33.1", "4.2", "10.2"},
+                {"BI1", "Brandon Ingram", "SF", "29000000", "3", "Healthy", "24.7", "5.8", "5.5"},
+                {"ZG1", "Zion Williamson", "PF", "30000000", "3", "Healthy", "26.0", "4.6", "7.0"},
+                {"BD4", "Devin Booker", "SG", "35000000", "4", "Healthy", "27.8", "5.5", "4.5"},
+                {"RM25", "Tyrese Maxey", "PG", "20000000", "4", "Healthy", "25.9", "6.2", "3.7"},
+                {"JR13", "Jalen Brunson", "PG", "26000000", "3", "Healthy", "28.6", "6.7", "3.6"},
+                {"SM0", "Shai Gilgeous-Alexander", "PG", "33000000", "4", "Healthy", "31.4", "5.5", "4.8"}
+        };
+
+        for (String[] data : defaultPlayers) {
+            Player p = new Player(data[0], data[1], data[2], Integer.parseInt(data[3]),
+                    Integer.parseInt(data[4]), data[5], Double.parseDouble(data[6]),
+                    Double.parseDouble(data[7]), Double.parseDouble(data[8]));
+            market.add(p);
+            originalMarket.add(new Player(p.code, p.name, p.position, p.salary,
+                    p.years, p.status, p.ppg, p.apg, p.rpg));
+        }
+
+        try (PrintWriter pw = new PrintWriter(new FileWriter(playerFile))) {
+            for (String[] data : defaultPlayers) {
+                pw.println(String.join(",", data));
+            }
+        } catch (IOException e) {
+            System.err.println("Error creating default players file: " + e.getMessage());
+        }
+    }
+
+    private void toggleGodMode() {
+        if (!isGodModeEnabled) {
+            int confirm = JOptionPane.showConfirmDialog(this,
+                    "Enabling God Mode will:\n" +
+                            "- Reset all your achievements.\n" +
+                            "- Prevent you from earning new achievements while active.\n" +
+                            "- Grant infinite budget (though budget display will reflect changes).\n" +
+                            "- Allow editing of player overall ratings.\n" +
+                            "- Allow adjusting maximum team size.\n" +
+                            "- Remove cooldowns for refreshing offers and proposing trades.\n\n" +
+                            "Achievements cannot be re-earned after disabling God Mode if they were already reset.\n\n" +
+                            "Do you want to proceed and enable God Mode?",
+                    "Enable God Mode?",
+                    JOptionPane.YES_NO_OPTION,
+                    JOptionPane.WARNING_MESSAGE);
+
+            if (confirm == JOptionPane.NO_OPTION) {
+                return;
+            }
+        }
+
+        isGodModeEnabled = !isGodModeEnabled;
+        updateGodModeState();
+
+        if (isGodModeEnabled) {
+            JOptionPane.showMessageDialog(this,
+                    "God Mode Enabled!\n" +
+                            "Achievements have been reset and are now disabled.\n" +
+                            "You have infinite budget, can edit player OVR, adjust max team size, and cooldowns are removed.",
+                    "God Mode Activated", JOptionPane.INFORMATION_MESSAGE);
+            clearAchievements();
+            addTransactionLog("GOD_MODE", "Enabled", 0, "God Mode activated. Achievements reset and disabled.");
+            initialBudget = budget;
+            team.forEach(p -> p.setOverallOverride(null));
+
+            // Disable cooldown timers immediately
+            if (freeAgentCooldownTimer != null && freeAgentCooldownTimer.isRunning()) {
+                freeAgentCooldownTimer.stop();
+                refreshOffersBtn.setEnabled(true);
+                refreshOffersBtn.setText("Refresh Offers");
+            }
+            if (tradeCooldownTimer != null && tradeCooldownTimer.isRunning()) {
+                tradeCooldownTimer.stop();
+                proposeTradeBtn.setEnabled(true);
+                proposeTradeBtn.setText("Propose Trade");
+            }
+
+        } else {
+            JOptionPane.showMessageDialog(this,
+                    "God Mode Disabled.\n" +
+                            "Normal game rules apply. Achievements remain disabled if they were reset while God Mode was active.",
+                    "God Mode Deactivated", JOptionPane.INFORMATION_MESSAGE);
+            addTransactionLog("GOD_MODE", "Disabled", 0, "God Mode deactivated.");
+            budget = initialBudget;
+            maxTeamSize = MAX_TEAM_SIZE_NORMAL;
+            team.forEach(p -> p.setOverallOverride(null));
+            refreshTable();
+            updateLabels();
+            // Cooldowns will automatically apply next time an action is attempted
+        }
+        setTitle("Unified Finance Manager - " + selectedTeam + (isGodModeEnabled ? " (GOD MODE)" : ""));
+        saveData();
+    }
+
+    private void updateGodModeState() {
+        if (isGodModeEnabled) {
+            addPlayerBtn.setBaseColor(new Color(128, 0, 128, 180));
+            addPlayerBtn.setEnabled(true);
+        } else {
+            addPlayerBtn.setBaseColor(new Color(60, 0, 0, 180));
+            addPlayerBtn.setEnabled(false);
+        }
+        addPlayerBtn.repaint();
+    }
+
+    private void initializeAchievements() {
+        List<Achievement> defaultAchievements = Arrays.asList(
+                new Achievement("First Season Complete", "Finish your first season."),
+                new Achievement("Made Playoffs", "Qualify for the playoffs."),
+                new Achievement("NBA Champion", "Win the NBA Championship!"),
+                new Achievement("Financial Stability", "Reach $200M in budget."),
+                new Achievement("Team Building", "Have a team of 15 players."),
+                new Achievement("Dynasty Builder", "Complete 5 seasons."),
+                new Achievement("Budget Maestro", "Accumulate $500M in budget."),
+                new Achievement("Trading Expert", "Execute 5 successful trades."),
+                new Achievement("Draft Master", "Acquire 10 draft picks."),
+                new Achievement("Contract Negotiator", "Sign 10 free agents."),
+                new Achievement("Undefeated Season", "Achieve an 82-0 record.")
+        );
+
+        for (Achievement defaultAch : defaultAchievements) {
+            Optional<Achievement> existingAch = achievements.stream()
+                    .filter(a -> a.name.equals(defaultAch.name))
+                    .findFirst();
+
+            if (existingAch.isEmpty()) {
+                achievements.add(defaultAch);
+            } else {
+                existingAch.get().description = defaultAch.description;
+            }
+        }
+    }
+
+    private void checkAndGrantAchievements() {
+        if (isGodModeEnabled) {
+            System.out.println("God Mode is enabled. Achievements cannot be earned.");
+            return;
+        }
+
+        findAchievement("First Season Complete").ifPresent(ach -> {
+            if (season > 1 && !ach.isUnlocked) {
+                ach.isUnlocked = true;
+                JOptionPane.showMessageDialog(this, "Achievement Unlocked: " + ach.name + "!", "Achievement", JOptionPane.INFORMATION_MESSAGE);
+                addTransactionLog("ACHIEVEMENT", ach.name, 0, "Unlocked: " + ach.name);
+            }
+        });
+
+        findAchievement("Made Playoffs").ifPresent(ach -> {
+            if (madePlayoffs && !ach.isUnlocked) {
+                ach.isUnlocked = true;
+                JOptionPane.showMessageDialog(this, "Achievement Unlocked: " + ach.name + "!", "Achievement", JOptionPane.INFORMATION_MESSAGE);
+                addTransactionLog("ACHIEVEMENT", ach.name, 0, "Unlocked: " + ach.name);
+            }
+        });
+
+        findAchievement("NBA Champion").ifPresent(ach -> {
+            if (wonChampionship && !ach.isUnlocked) {
+                ach.isUnlocked = true;
+                JOptionPane.showMessageDialog(this, "Achievement Unlocked: " + ach.name + "!", "Achievement", JOptionPane.INFORMATION_MESSAGE);
+                addTransactionLog("ACHIEVEMENT", ach.name, 0, "Unlocked: " + ach.name);
+            }
+        });
+
+        findAchievement("Financial Stability").ifPresent(ach -> {
+            if (budget >= 200_000_000 && !ach.isUnlocked) {
+                ach.isUnlocked = true;
+                JOptionPane.showMessageDialog(this, "Achievement Unlocked: " + ach.name + "!", "Achievement", JOptionPane.INFORMATION_MESSAGE);
+                addTransactionLog("ACHIEVEMENT", ach.name, 0, "Unlocked: " + ach.name);
+            }
+        });
+
+        findAchievement("Team Building").ifPresent(ach -> {
+            if (team.size() == MAX_TEAM_SIZE_NORMAL && !ach.isUnlocked) {
+                ach.isUnlocked = true;
+                JOptionPane.showMessageDialog(this, "Achievement Unlocked: " + ach.name + "!", "Achievement", JOptionPane.INFORMATION_MESSAGE);
+                addTransactionLog("ACHIEVEMENT", ach.name, 0, "Unlocked: " + ach.name);
+            }
+        });
+
+        findAchievement("Dynasty Builder").ifPresent(ach -> {
+            if (season >= 5 && !ach.isUnlocked) {
+                ach.isUnlocked = true;
+                JOptionPane.showMessageDialog(this, "Achievement Unlocked: " + ach.name + "!", "Achievement", JOptionPane.INFORMATION_MESSAGE);
+                addTransactionLog("ACHIEVEMENT", ach.name, 0, "Unlocked: " + ach.name);
+            }
+        });
+
+        findAchievement("Budget Maestro").ifPresent(ach -> {
+            if (budget >= 500_000_000 && !ach.isUnlocked) {
+                ach.isUnlocked = true;
+                JOptionPane.showMessageDialog(this, "Achievement Unlocked: " + ach.name + "!", "Achievement", JOptionPane.INFORMATION_MESSAGE);
+                addTransactionLog("ACHIEVEMENT", ach.name, 0, "Unlocked: " + ach.name);
+            }
+        });
+
+        findAchievement("Trading Expert").ifPresent(ach -> {
+            long successfulTrades = transactionLogs.stream().filter(log -> log.type.equals("TRADE")).count();
+            if (successfulTrades >= 5 && !ach.isUnlocked) {
+                ach.isUnlocked = true;
+                JOptionPane.showMessageDialog(this, "Achievement Unlocked: " + ach.name + "!", "Achievement", JOptionPane.INFORMATION_MESSAGE);
+                addTransactionLog("ACHIEVEMENT", ach.name, 0, "Unlocked: " + ach.name);
+            }
+        });
+
+        findAchievement("Draft Master").ifPresent(ach -> {
+            if (draftPicks.size() >= 10 && !ach.isUnlocked) {
+                ach.isUnlocked = true;
+                JOptionPane.showMessageDialog(this, "Achievement Unlocked: " + ach.name + "!", "Achievement", JOptionPane.INFORMATION_MESSAGE);
+                addTransactionLog("ACHIEVEMENT", ach.name, 0, "Unlocked: " + ach.name);
+            }
+        });
+
+        findAchievement("Contract Negotiator").ifPresent(ach -> {
+            long signedFreeAgents = transactionLogs.stream().filter(log -> log.type.equals("FREE_AGENT_SIGNING")).count();
+            if (signedFreeAgents >= 10 && !ach.isUnlocked) {
+                ach.isUnlocked = true;
+                JOptionPane.showMessageDialog(this, "Achievement Unlocked: " + ach.name + "!", "Achievement", JOptionPane.INFORMATION_MESSAGE);
+                addTransactionLog("ACHIEVEMENT", ach.name, 0, "Unlocked: " + ach.name);
+            }
+        });
+
+        findAchievement("Undefeated Season").ifPresent(ach -> {
+            if (wins == 82 && !ach.isUnlocked) {
+                ach.isUnlocked = true;
+                JOptionPane.showMessageDialog(this, "Achievement Unlocked: " + ach.name + "!", "Achievement", JOptionPane.INFORMATION_MESSAGE);
+                addTransactionLog("ACHIEVEMENT", ach.name, 0, "Unlocked: " + ach.name);
+            }
+        });
+
+        saveAchievements();
+    }
+
+    private Optional<Achievement> findAchievement(String name) {
+        return achievements.stream().filter(a -> a.name.equals(name)).findFirst();
+    }
+
+    private void clearAchievements() {
+        achievements.forEach(ach -> ach.isUnlocked = false);
+        saveAchievements();
+    }
+
+    private void saveAchievements() {
+        try (PrintWriter pw = new PrintWriter(new FileWriter(achievementFile))) {
+            for (Achievement ach : achievements) {
+                pw.println(ach.name.replace(",", "&#44;") + "," + ach.isUnlocked);
+            }
+        } catch (IOException e) {
+            System.err.println("Error saving achievements for user " + currentUsername + ": " + e.getMessage());
+        }
+    }
+
+    private void loadAchievements() {
+        File file = new File(achievementFile);
+        if (!file.exists()) {
+            initializeAchievements();
+            return;
+        }
+
+        List<Achievement> loadedAchievementsTemp = new ArrayList<>();
+        try (BufferedReader br = new BufferedReader(new FileReader(file))) {
+            String line;
+            while ((line = br.readLine()) != null) {
+                String[] parts = line.split(",", 2);
+                if (parts.length >= 2) {
+                    String achievementName = parts[0].replace("&#44;", ",");
+                    boolean unlocked = Boolean.parseBoolean(parts[1]);
+                    loadedAchievementsTemp.add(new Achievement(achievementName, "", unlocked));
+                }
+            }
+        } catch (IOException | NumberFormatException e) {
+            System.err.println("Error loading achievements for user " + currentUsername + ": " + e.getMessage());
+        }
+
+        initializeAchievements();
+
+        for (Achievement defaultAch : achievements) {
+            for (Achievement loadedAch : loadedAchievementsTemp) {
+                if (defaultAch.name.equals(loadedAch.name)) {
+                    defaultAch.isUnlocked = loadedAch.isUnlocked;
+                    break;
+                }
+            }
+        }
+    }
+
+    private void showAchievementsDialog() {
+        JDialog achievementsDialog = new JDialog(this, "Your Achievements", true);
+        configureDialog(achievementsDialog, "Your Achievements", new Color(139, 0, 0));
+        achievementsDialog.setSize(600, 500);
+        achievementsDialog.setLocationRelativeTo(this);
+
+        JPanel contentPanel = new JPanel();
+        contentPanel.setLayout(new BoxLayout(contentPanel, BoxLayout.Y_AXIS));
+        contentPanel.setBackground(new Color(30, 30, 30));
+        contentPanel.setBorder(new EmptyBorder(10, 20, 10, 20));
+
+        long unlockedCount = achievements.stream().filter(a -> a.isUnlocked).count();
+        JLabel achievementProgressLabel = new JLabel(String.format("Achievements: %d/%d Unlocked", unlockedCount, achievements.size()), SwingConstants.CENTER);
+        achievementProgressLabel.setFont(new Font("Arial", Font.BOLD, 18));
+        achievementProgressLabel.setForeground(Color.YELLOW);
+        achievementProgressLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
+        contentPanel.add(achievementProgressLabel);
+        contentPanel.add(Box.createVerticalStrut(15));
+
+        for (Achievement ach : achievements) {
+            JPanel achPanel = new JPanel(new BorderLayout());
+            achPanel.setBackground(ach.isUnlocked ? new Color(50, 100, 50) : new Color(80, 80, 80));
+            achPanel.setBorder(BorderFactory.createCompoundBorder(
+                    BorderFactory.createLineBorder(Color.BLACK, 1),
+                    new EmptyBorder(10, 10, 10, 10)
+            ));
+            achPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 70));
+
+            JLabel nameLabel = new JLabel("<html><b>" + ach.name + "</b></html>");
+            nameLabel.setFont(new Font("Arial", Font.BOLD, 16));
+            nameLabel.setForeground(Color.WHITE);
+
+            JLabel descLabel = new JLabel("<html><i>" + ach.description + "</i></html>");
+            descLabel.setFont(new Font("Arial", Font.PLAIN, 12));
+            descLabel.setForeground(Color.LIGHT_GRAY);
+
+            JPanel textPanel = new JPanel(new GridLayout(2, 1));
+            textPanel.setOpaque(false);
+            textPanel.add(nameLabel);
+            textPanel.add(descLabel);
+            achPanel.add(textPanel, BorderLayout.CENTER);
+
+            JLabel statusLabel = new JLabel(ach.isUnlocked ? "UNLOCKED" : "LOCKED");
+            statusLabel.setFont(new Font("Arial", Font.BOLD, 14));
+            statusLabel.setForeground(ach.isUnlocked ? Color.YELLOW : Color.RED);
+            statusLabel.setBorder(new EmptyBorder(0, 10, 0, 0));
+            achPanel.add(statusLabel, BorderLayout.EAST);
+
+            contentPanel.add(achPanel);
+            contentPanel.add(Box.createVerticalStrut(10));
+        }
+
+        JScrollPane scrollPane = new JScrollPane(contentPanel);
+        scrollPane.setBorder(BorderFactory.createLineBorder(Color.GRAY, 2));
+        achievementsDialog.add(scrollPane, BorderLayout.CENTER);
+        achievementsDialog.setVisible(true);
+    }
+
+    static class Player {
+        String code, name, position, status;
+        int salary, years;
+        double ppg, apg, rpg;
+        private Integer overallOverride = null;
+
+        public Player(String code, String name, String position, int salary, int years,
+                      String status, double ppg, double apg, double rpg) {
+            this.code = code;
+            this.name = name;
+            this.position = position;
+            this.salary = salary;
+            this.years = years;
+            this.status = status;
+            this.ppg = ppg;
+            this.apg = apg;
+            this.rpg = rpg;
+            this.overallOverride = null;
+        }
+
+        public void setOverallOverride(Integer overall) {
+            this.overallOverride = overall;
+        }
+
+        public int getOverall() {
+            if (overallOverride != null) {
+                return overallOverride;
+            }
+
+            double baseRating = (ppg * 4.0 + apg * 2.5 + rpg * 2.0);
+            baseRating = baseRating / 2.5;
+
+            switch (position) {
+                case "PG":
+                    baseRating += apg * 2.0;
+                    baseRating += ppg * 0.5;
+                    break;
+                case "SG":
+                    baseRating += ppg * 1.5;
+                    break;
+                case "SF":
+                    baseRating += (ppg + rpg) * 0.8;
+                    break;
+                case "PF":
+                    baseRating += (rpg * 1.5 + ppg * 0.5);
+                    break;
+                case "C":
+                    baseRating += rpg * 2.0;
+                    baseRating += ppg * 0.2;
+                    break;
+            }
+
+            if ("Injured".equals(status)) {
+                baseRating *= 0.75;
+            }
+
+            return Math.max(40, Math.min(99, (int) Math.round(baseRating)));
+        }
+
+        public boolean isSuperstar() {
+            return getOverall() >= 90;
+        }
+    }
+
+    static class TransactionLog {
+        String date, type, playerName, details;
+        double amount;
+
+        public TransactionLog(String date, String type, String playerName, double amount, String details) {
+            this.date = date;
+            this.type = type;
+            this.playerName = playerName;
+            this.amount = amount;
+            this.details = details;
+        }
+    }
+
+    static class DraftPick {
+        private int year;
+        private int round;
+
+        public DraftPick(int year, int round) {
+            this.year = year;
+            this.round = round;
+        }
+
+        public int getYear() {
+            return year;
+        }
+
+        public int getRound() {
+            return round;
+        }
+
+        @Override
+        public String toString() {
+            return year + " " + (round == 1 ? "1st" : "2nd") + " Round Pick";
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            DraftPick draftPick = (DraftPick) o;
+            return year == draftPick.year && round == draftPick.round;
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(year, round);
+        }
+    }
+
+    static class Achievement {
+        String name;
+        String description;
+        boolean isUnlocked;
+
+        public Achievement(String name, String description) {
+            this.name = name;
+            this.description = description;
+            this.isUnlocked = false;
+        }
+
+        public Achievement(String name, String description, boolean isUnlocked) {
+            this.name = name;
+            this.description = description;
+            this.isUnlocked = isUnlocked;
+        }
+    }
+
+    static class AnimatedButton extends JButton {
+        private Color baseColor;
+        private Color hoverColor;
+
+        public AnimatedButton(String text) {
+            super(text);
+            this.baseColor = new Color(60, 0, 0, 180);
+            this.hoverColor = new Color(80, 0, 0, 200);
+            setForeground(Color.WHITE);
+            setFont(new Font("Arial", Font.BOLD, 14));
+            setFocusPainted(false);
+            setBorderPainted(false);
+            setContentAreaFilled(false);
+            setCursor(new Cursor(Cursor.HAND_CURSOR));
+
+            addMouseListener(new MouseAdapter() {
+                private Color originalColor = baseColor;
+
+                @Override
+                public void mouseEntered(MouseEvent e) {
+                    originalColor = baseColor;
+                    baseColor = hoverColor;
+                    repaint();
+                }
+
+                @Override
+                public void mouseExited(MouseEvent e) {
+                    baseColor = originalColor;
+                    repaint();
+                }
+            });
+        }
+
+        public void setBaseColor(Color newColor) {
+            this.baseColor = newColor;
+            this.hoverColor = new Color(Math.min(255, newColor.getRed() + 20),
+                    Math.min(255, newColor.getGreen() + 20),
+                    Math.min(255, newColor.getBlue() + 20),
+                    Math.min(255, newColor.getAlpha() + 20));
+        }
+
+        @Override
+        protected void paintComponent(Graphics g) {
+            Graphics2D g2 = (Graphics2D) g.create();
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g2.setColor(baseColor);
+            g2.fillRoundRect(0, 0, getWidth(), getHeight(), 15, 15);
+            g2.dispose();
+        }
+
+        @Override
+        public void paint(Graphics g) {
+            paintComponent(g);
+            Graphics2D g2 = (Graphics2D) g.create();
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g2.setColor(getForeground());
+            FontMetrics fm = g2.getFontMetrics();
+            int x = (getWidth() - fm.stringWidth(getText())) / 2;
+            int y = ((getHeight() - fm.getHeight()) / 2) + fm.getAscent();
+            g2.drawString(getText(), x, y);
+            g2.dispose();
+        }
+    }
+
+    static class DarkThemeTableCellRenderer extends DefaultTableCellRenderer {
+        private final Color ROW_COLOR_ODD = Color.BLACK;
+        private final Color ROW_COLOR_EVEN = new Color(15, 15, 15);
+        private final Color TEXT_COLOR = Color.WHITE;
+        private List<Player> referencePlayers;
+
+        public DarkThemeTableCellRenderer(List<Player> referencePlayers) {
+            this.referencePlayers = referencePlayers;
+        }
+
+        @Override
+        protected void paintComponent(Graphics g) {
+            Graphics2D g2 = (Graphics2D) g.create();
+            g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+            super.paintComponent(g2);
+            g2.dispose();
+        }
+
+        @Override
+        public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected, boolean hasFocus, int row, int column) {
+            super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
+
+            if (isSelected) {
+                setBackground(table.getSelectionBackground());
+            } else {
+                if (row % 2 == 0) {
+                    setBackground(ROW_COLOR_EVEN);
+                } else {
+                    setBackground(ROW_COLOR_ODD);
+                }
+            }
+
+            setForeground(TEXT_COLOR);
+            setFont(table.getFont());
+            setBorder(new EmptyBorder(5, 5, 5, 5));
+
+            if (column == 1 && value instanceof String) {
+                String playerName = (String) value;
+                Optional<Player> playerOptional = referencePlayers.stream()
+                        .filter(p -> p.name.equals(playerName))
+                        .findFirst();
+
+                if (playerOptional.isPresent() && playerOptional.get().isSuperstar()) {
+                    setForeground(Color.YELLOW);
+                    setText("<html><b>" + playerName + " ⭐</b></html>");
+                } else {
+                    setForeground(TEXT_COLOR);
+                    setText("<html><b>" + playerName + "</b></html>");
+                }
+            } else {
+                setForeground(TEXT_COLOR);
+                setText(value != null ? value.toString() : "");
+            }
+
+            return this;
+        }
+    }
+
+    class SpinnerCellEditor extends AbstractCellEditor implements TableCellEditor {
+        final JSpinner spinner;
+
+        public SpinnerCellEditor(SpinnerModel model) {
+            spinner = new JSpinner(model);
+            spinner.setBorder(BorderFactory.createEmptyBorder());
+            spinner.setFont(new Font("Arial", Font.PLAIN, 13));
+            spinner.addChangeListener(e -> fireEditingStopped());
+            // Apply dark theme to the spinner's text field within the editor
+            JComponent editor = spinner.getEditor();
+            if (editor instanceof JSpinner.DefaultEditor) {
+                JFormattedTextField textField = ((JSpinner.DefaultEditor) editor).getTextField();
+                textField.setBackground(new Color(60, 60, 60)); // Dark background
+                textField.setForeground(Color.WHITE); // White text
+                textField.setBorder(BorderFactory.createLineBorder(new Color(100, 100, 100), 1)); // Subtle border
+            }
+        }
+
+        @Override
+        public Component getTableCellEditorComponent(JTable table, Object value, boolean isSelected, int row, int column) {
+            spinner.setValue(value);
+            return spinner;
+        }
+
+        @Override
+        public Object getCellEditorValue() {
+            return spinner.getValue();
+        }
+    }
+
+
+    public static void main(String[] args) {
+        SwingUtilities.invokeLater(() -> {
+            try {
+                UnifiedFinanceManager frame = new UnifiedFinanceManager();
+                frame.setVisible(true);
+            } catch (Exception e) {
+                e.printStackTrace();
+                JOptionPane.showMessageDialog(null,
+                        "Error starting application: " + e.getMessage(),
+                        "Startup Error",
+                        JOptionPane.ERROR_MESSAGE);
+            }
+        });
+    }
+}
